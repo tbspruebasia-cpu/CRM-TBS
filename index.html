@@ -380,6 +380,7 @@ function vistaDatos(a, titulo, ids) {
 
   const totalTemp = (a.temperaturas['Frío']||0) + (a.temperaturas['Tibio']||0) + (a.temperaturas['Caliente']||0);
   const convCalif = a.leads ? Math.round(100 * a.calif / a.leads) : 0;
+  const reprog = st.leadsListo ? todos(ids).filter(reprogramada).length : 0;
 
   frag.append(
     el('div', { class:'bar' },
@@ -402,7 +403,8 @@ function vistaDatos(a, titulo, ids) {
       kpi(a.contestadas, 'Llamadas contestadas', 'var(--ok)'),
       kpi(a.noContestadas, 'No contestadas', 'var(--bad)'),
       kpi(a.volverALlamar, 'Volver a llamar', 'var(--call)'),
-      kpi(a.pend, 'Llamadas pendientes', 'var(--mute)')
+      kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
+      kpi(reprog, 'Llamadas reprogramadas', 'var(--call)')
     ),
 
     panelAlertas(ids),
@@ -429,6 +431,7 @@ function vistaDatos(a, titulo, ids) {
           'Contestó': a.contestadas,
           'No contestó': a.noContestadas,
           'Volver a llamar': a.volverALlamar,
+          'Reprogramada': reprog,
           'Pendiente': a.pend,
           'Se inscribió': a.inscritos,
           'No interesado': a.noInteresados
@@ -613,9 +616,12 @@ const sinLlamar = l => !l.ll || l.ll === 'Pendiente';
 const enCola = l => {
   if (cerrado(l)) return false;
   const h = hoyISO();
-  if (l.prox && l.prox > h) return false;                       // tiene una próxima llamada en el futuro
-  return !!l.prox || ['', 'Pendiente', 'Volver a llamar', 'No contestó'].includes(l.ll || '');
+  if (l.prox) return l.prox <= h;                               // reprogramada: aparece solo cuando llega su fecha (hoy o atrasada)
+  return ['', 'Pendiente', 'Volver a llamar'].includes(l.ll || ''); // "No contestó" sin fecha = intentos hechos, sin interés: no figura
 };
+// Ya hubo un primer contacto y quedó con fecha futura: cuenta como llamada hecha, no como pendiente
+const reprogramada = l => !cerrado(l) && !sinLlamar(l) && !!l.prox && l.prox > hoyISO();
+const fechaLarga = iso => iso ? corto(iso) : '';
 const rankTemp = l => ({ Caliente:0, Tibio:1, '':2, 'Frío':3 })[l.temp] ?? 2;
 const cola = () => todos().filter(enCola).sort((a, b) => rankTemp(a) - rankTemp(b) || b.score - a.score);
 const alertas = ids => todos(ids).filter(l => !cerrado(l) && sinLlamar(l) && (l.temp === 'Caliente' || l.score >= 75) && (l.dias || 0) >= 1).sort((a, b) => b.dias - a.dias);
@@ -623,7 +629,11 @@ const alertas = ids => todos(ids).filter(l => !cerrado(l) && sinLlamar(l) && (l.
 const tChip = t => el('span', { class:'chip t-' + (t || 'Sin') }, t || 'Sin clasificar');
 const eCls = e => 'chip e e-' + ({ 'Se inscribió':'Inscrito', 'Contestó':'Contestó', 'Volver a llamar':'Volver', 'No contestó':'No', 'No interesado':'No' }[e] || 'x');
 const eChip = e => el('span', { class: !e || e === 'Pendiente' ? 'chip e' : eCls(e) }, e || 'Pendiente');
-const sedeTag = l => el('span', { class:'sc', style:'--sc:' + colorSede(l.sede) }, l.sedeNom);
+// Chip de llamada por persona: si está reprogramada se ve como llamada hecha con nota de fecha
+const llChip = l => reprogramada(l)
+  ? el('span', { class:'chip e e-Volver', title:'Ya se hizo el primer contacto' }, 'Llamada reprogramada · ' + fechaLarga(l.prox))
+  : eChip(l.ll);
+const sedeTag = l =>el('span', { class:'sc', style:'--sc:' + colorSede(l.sede) }, l.sedeNom);
 const nombre = l => l.sinNombre ? el('span', { class:'sn' }, 'Sin nombre') : l.nombre;
 const digitos = t => String(t || '').replace(/\D/g, '');
 const waBtn = l => el('a', { class:'wa', href:'https://wa.me/' + digitos(l.tel), target:'_blank', rel:'noopener', onclick:e => e.stopPropagation() }, 'WhatsApp');
@@ -709,7 +719,7 @@ function vistaLeads() {
       multi ? el('td', {}, sedeTag(l)) : null,
       el('td', {}, l.carr.length > 26 ? l.carr.slice(0, 24) + '…' : l.carr),
       el('td', {}, el('span', { class:'sbar' }, el('i', { style:`width:${Math.min(100, l.score)}%` })), String(l.score)),
-      el('td', {}, tChip(l.temp)), el('td', {}, eChip(l.ll)),
+      el('td', {}, tChip(l.temp)), el('td', {}, llChip(l)),
       el('td', {}, l.dias === 0 ? 'Hoy' : l.primer ? corto(l.primer) : '—'),
       el('td', {}, waBtn(l)))))) : el('div', { class:'msg' }, 'Ninguna persona coincide con los filtros')));
   if (r.length > 100) frag.append(el('div', { class:'foot' }, `Mostrando 100 de ${r.length}. Usa el buscador o los filtros para acotar.`));
@@ -731,8 +741,8 @@ function vistaLlamar() {
     frag.append(el('div', { class:'q', style:'--sc:' + (multi ? colorSede(l.sede) : 'var(--cold)') },
       el('div', { class:'av' }, l.sinNombre ? '?' : l.nombre[0].toUpperCase()),
       el('div', {}, el('h4', { onclick:() => abrir(l.key) }, nombre(l)),
-        el('div', { class:'m' }, tChip(l.temp), eChip(l.ll), el('span', {}, 'Score ' + l.score),
-          l.prox ? el('b', { style:'color:var(--call)' }, rel(l.prox)) : null,
+        el('div', { class:'m' }, tChip(l.temp), l.prox && !sinLlamar(l) ? el('span', { class:'chip e e-Volver' }, 'Llamada reprogramada · ' + rel(l.prox)) : eChip(l.ll), el('span', {}, 'Score ' + l.score),
+          l.prox && sinLlamar(l) ? el('b', { style:'color:var(--call)' }, rel(l.prox)) : null,
           el('span', {}, l.carr.length > 30 ? l.carr.slice(0, 28) + '…' : l.carr), multi ? sedeTag(l) : null, el('span', {}, l.tel))),
       el('div', { class:'acts' }, telBtn(l), waBtn(l),
         b('ok', 'Contestó', { estado:'Contestó', proxima:'' }, 'Marcado: contestó'),
@@ -771,7 +781,7 @@ function vistaDetalle() {
   return el('div', { class:'ov', onclick:e => { if (e.target.classList.contains('ov')) cerrarDetalle(); } },
     el('div', { class:'dr', style:'--sc:' + colorSede(l.sede), role:'dialog', 'aria-label':'Detalle del lead' },
       el('div', { style:'display:flex;justify-content:space-between;align-items:start;gap:10px' },
-        el('div', {}, el('h2', {}, nombre(l)), el('div', { style:'display:flex;gap:6px;margin-top:6px;flex-wrap:wrap' }, sedeTag(l), tChip(l.temp), eChip(l.ll))),
+        el('div', {}, el('h2', {}, nombre(l)), el('div', { style:'display:flex;gap:6px;margin-top:6px;flex-wrap:wrap' }, sedeTag(l), tChip(l.temp), llChip(l))),
         el('button', { class:'ghost', onclick:cerrarDetalle }, 'Cerrar')),
       el('div', { style:'display:flex;gap:8px;flex-wrap:wrap;margin:14px 0' }, waBtn(l), telBtn(l), copiar),
       el('div', { class:'f' }, el('span', {}, 'Teléfono'), el('span', {}, l.tel), el('span', {}, 'Carrera'), el('span', {}, l.carr),
