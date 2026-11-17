@@ -451,6 +451,10 @@ function vistaDatos(a, titulo, ids) {
   const totalTemp = (a.temperaturas['Frío']||0) + (a.temperaturas['Tibio']||0) + (a.temperaturas['Caliente']||0);
   const convCalif = a.leads ? Math.round(100 * a.calif / a.leads) : 0;
   const reprog = st.leadsListo ? todos(ids).filter(reprogramada).length : 0;
+  const fm = filasMetas(ids);
+  const mf = { ins: fm.reduce((x, y) => x + y.ins, 0), meta: fm.reduce((x, y) => x + y.meta, 0) };
+  const totLeads = st.leadsListo ? todos(ids).length : 0;
+  const convInsc = totLeads ? (Math.round(1000 * mf.ins / totLeads) / 10) + '%' : '—'; // inscritos ÷ todos los leads
 
   frag.append(
     el('div', { class:'bar' },
@@ -474,7 +478,10 @@ function vistaDatos(a, titulo, ids) {
       kpi(a.noContestadas, 'No contestadas', 'var(--bad)'),
       kpi(a.volverALlamar, 'Volver a llamar', 'var(--call)'),
       kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
-      kpi(reprog, 'Llamadas reprogramadas', 'var(--call)')
+      kpi(reprog, 'Llamadas reprogramadas', 'var(--call)'),
+      kpi(mf.ins, 'Estudiantes inscritos', 'var(--ok)'),
+      kpi(convInsc, 'Conversión a inscrito', 'var(--brand)'),
+      kpi(mf.meta ? `${mf.ins} / ${mf.meta}` : '—', `Meta de inscritos · ${mf.meta ? Math.round(100 * mf.ins / mf.meta) : 0}%`, 'var(--brand2)')
     ),
 
     panelMetas(ids),
