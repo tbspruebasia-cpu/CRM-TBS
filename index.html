@@ -502,8 +502,10 @@ function vistaDatos(a, titulo, ids) {
   const reprog = st.leadsListo ? todos(ids).filter(reprogramada).length : 0;
   const fm = filasMetas(ids);
   const mf = { ins: fm.reduce((x, y) => x + y.ins, 0), meta: fm.reduce((x, y) => x + y.meta, 0) };
-  const totLeads = st.leadsListo ? todos(ids).length : 0;
-  const convInsc = totLeads ? (Math.round(1000 * mf.ins / totLeads) / 10) + '%' : '—'; // inscritos ÷ todos los leads
+  // Calificados acumulados (todos los días que devuelve cada sede), para que sean comparables con los inscritos (que también son acumulados)
+  const califAcum = sedesOk().filter(s => (!ids || ids.includes(s.id)) && st.data[s.id])
+    .reduce((t, s) => t + Object.values(st.data[s.id].dias || {}).reduce((u, x) => u + Number((x && x.calificados) || 0), 0), 0);
+  const convInsc = califAcum ? (Math.round(1000 * mf.ins / califAcum) / 10) + '%' : '—'; // inscritos ÷ leads calificados
 
   frag.append(
     el('div', { class:'bar' },
@@ -529,7 +531,7 @@ function vistaDatos(a, titulo, ids) {
       kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
       kpi(reprog, 'Llamadas reprogramadas', 'var(--call)'),
       kpi(mf.ins, 'Estudiantes inscritos', 'var(--ok)'),
-      kpi(convInsc, 'Conversión a inscrito', 'var(--brand)'),
+      kpi(convInsc, 'Conversión a inscrito (de calificados)', 'var(--brand)'),
       kpi(mf.meta ? `${mf.ins} / ${mf.meta}` : '—', `Meta de inscritos · ${mf.meta ? Math.round(100 * mf.ins / mf.meta) : 0}%`, 'var(--brand2)')
     ),
 
