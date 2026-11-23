@@ -216,10 +216,10 @@ nav .cnt{background:var(--hot);color:#fff;font:700 11px Figtree;border-radius:99
 <script>
 /* ═══ CONFIGURACIÓN: pega aquí la URL /exec de cada sede (la misma APPS_SCRIPT_URL de su bot) ═══ */
 const SEDES = [
-  { id:'lapaz', abbr:'LP',  nombre:'La Paz',      url:'https://script.google.com/macros/s/AKfycbwsIkKF6kY8bo4OdwM3Ibd11yZFiJOckDjtarPsb65rBxOWpBwkV4onXYt2AtKypdqS/exec' },
-  { id:'elalto', abbr:'EA', nombre:'El Alto',     url:'https://script.google.com/macros/s/AKfycbz2ggOd1xuHxhjOGrjTlx9_677R4EncCYyBCGDz1GG0snD6owjlCkmorWOdn4-rh3qjbw/exec' },
-  { id:'potosi', abbr:'PT', nombre:'Potosí',      url:'https://script.google.com/macros/s/AKfycbzm1UPPKl4-r4E-cil2s257mQBO8huRLiyoMIY_l1kmx1F0rsQHifVP64yR6NRiu6v2yA/exec' },
-  { id:'scz', abbr:'SC',    nombre:'Santa Cruz',  url:'https://script.google.com/macros/s/AKfycbxPTiIWaGBA-3_UTqH8QFnpHpLWpjROEUosak2BX9u50q6PpgRRsahIy-jsjjsNYQsN3Q/exec' }
+  { id:'lapaz', abbr:'LP',  nombre:'La Paz',      url:'https://script.google.com/macros/s/AKfycbxr9Zn0551kZMnxcZNiD4E6AibbmcRwNZ-2dr9Ewx3IpvUAbKH9zOAuDoCOz3dEr8kb/exec' },
+  { id:'elalto', abbr:'EA', nombre:'El Alto',     url:'https://script.google.com/macros/s/AKfycbyIkKiVukFLCDURHCvbwNi8Q5iPwPHKgvETzZdsKHz6uEB3GPZFblSFSA6Y3XICLjZjPA/exec' },
+  { id:'potosi', abbr:'PT', nombre:'Potosí',      url:'https://script.google.com/macros/s/AKfycbynYQdvK_jlWuOIPcVBeus62K5UD6HTAxlfY8WSjqileyRBf18zGulqIfdFveliaZD__A/exec' },
+  { id:'scz', abbr:'SC',    nombre:'Santa Cruz',  url:'https://script.google.com/macros/s/AKfycbzl_GMoXF58vsZcg6VsoBLaOHU5YdNExF2Etxd79WVgTriyP2RwMMVvWIVjDxFO1rX3qg/exec' }
 ];
 const REFRESCO_MS = 60 * 1000;
 /* ═══ METAS DE INSCRITOS por sede (cámbialas aquí cuando haga falta). Usa los mismos id de SEDES. ═══ */
@@ -260,7 +260,7 @@ const hoyMes = () => new Intl.DateTimeFormat('en-CA', { timeZone:'America/La_Paz
 const $app = document.getElementById('app');
 const st = { tab:'total', dias:14, mes:hoyMes(), metrica:'leads', vista:'cal', dia:null, data:{}, err:{}, cargando:false, ult:null,
   sinAcceso:{}, leads:{}, errLeads:{}, recortado:{}, cargandoLeads:false, leadsListo:false, guardando:{}, sel:null, pend:false,
-  q:'', sedeF:'', carrera:'', ll:'', temp:'', ing:'' };
+  q:'', sedeF:'', carrera:'', ll:'', temp:'', ing:'', conteos:{}, errConteos:{} };
 const FETCH_TIMEOUT_MS = 7000;
 async function fetchConTimeout(url, ms = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -318,12 +318,12 @@ async function loadAll() {
   if (SEDES.every(s => st.sinAcceso[s.id])) {   // el código no abre NINGUNA sede: es incorrecto
     clearKey(); st.claveMala = true; reiniciarDatos(); st.cargando = false; render(); return;
   }
-  await Promise.allSettled([loadLeads(), loadInsc()]);
+  await Promise.allSettled([loadLeads(), loadInsc(), loadConteos()]);
   st.cargando = false;
   st.ult = new Date();
   renderSuave();
 }
-function reiniciarDatos() { st.sinAcceso = {}; st.data = {}; st.err = {}; st.leads = {}; st.errLeads = {}; st.leadsListo = false; st.sel = null; st.insc = null; st.inscCarr = null; st.inscErr = null; }
+function reiniciarDatos() { st.conteos = {}; st.errConteos = {}; st.sinAcceso = {}; st.data = {}; st.err = {}; st.leads = {}; st.errLeads = {}; st.leadsListo = false; st.sel = null; st.insc = null; st.inscCarr = null; st.inscErr = null; }
 
 function agg(list, n) {
   const dias = rango(n), hoy = hoyISO();
@@ -499,13 +499,13 @@ function vistaDatos(a, titulo, ids) {
 
   const totalTemp = (a.temperaturas['Frío']||0) + (a.temperaturas['Tibio']||0) + (a.temperaturas['Caliente']||0);
   const convCalif = a.leads ? Math.round(100 * a.calif / a.leads) : 0;
-  const reprog = st.leadsListo ? todos(ids).filter(reprogramada).length : 0;
+  const llamadas = st.leadsListo ? llamadasHechas(ids) : [];
+  const resumen = resumenLlamadas(ids);
+  const conteo = g => resumen[g] === null ? '—' : resumen[g];
   const fm = filasMetas(ids);
   const mf = { ins: fm.reduce((x, y) => x + y.ins, 0), meta: fm.reduce((x, y) => x + y.meta, 0) };
-  // Calificados acumulados (todos los días que devuelve cada sede), para que sean comparables con los inscritos (que también son acumulados)
-  const califAcum = sedesOk().filter(s => (!ids || ids.includes(s.id)) && st.data[s.id])
-    .reduce((t, s) => t + Object.values(st.data[s.id].dias || {}).reduce((u, x) => u + Number((x && x.calificados) || 0), 0), 0);
-  const convInsc = califAcum ? (Math.round(1000 * mf.ins / califAcum) / 10) + '%' : '—'; // inscritos ÷ leads calificados
+  const totLeads = st.leadsListo ? todos(ids).length : 0;
+  const convInsc = totLeads ? (Math.round(1000 * mf.ins / totLeads) / 10) + '%' : '—'; // inscritos ÷ todos los leads
 
   frag.append(
     el('div', { class:'bar' },
@@ -527,17 +527,21 @@ function vistaDatos(a, titulo, ids) {
       kpi(convCalif + '%', 'Conversión a calificado', 'var(--brand)'),
       kpi(a.contestadas, 'Llamadas contestadas', 'var(--ok)'),
       kpi(a.noContestadas, 'No contestadas', 'var(--bad)'),
-      kpi(a.volverALlamar, 'Volver a llamar', 'var(--call)'),
       kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
-      kpi(reprog, 'Llamadas reprogramadas', 'var(--call)'),
+      kpi(conteo('leads'), 'Llamadas a leads', 'var(--leads)'),
+      kpi(conteo('calificados'), 'Llamadas a leads calificados', 'var(--brand2)'),
+      kpi(conteo('callcenter'), 'Llamadas Call Center', 'var(--call)'),
+      kpi(['leads','calificados','callcenter'].every(g => resumen[g] !== null) ? resumen.leads + resumen.calificados + resumen.callcenter : '—', 'Total de llamadas · acumuladas', 'var(--ok)'),
       kpi(mf.ins, 'Estudiantes inscritos', 'var(--ok)'),
-      kpi(convInsc, 'Conversión a inscrito (de calificados)', 'var(--brand)'),
+      kpi(convInsc, 'Conversión a inscrito', 'var(--brand)'),
       kpi(mf.meta ? `${mf.ins} / ${mf.meta}` : '—', `Meta de inscritos · ${mf.meta ? Math.round(100 * mf.ins / mf.meta) : 0}%`, 'var(--brand2)')
     ),
 
     panelMetas(ids),
-
-    panelAlertas(ids),
+    (['leads','calificados','callcenter'].some(g => resumen[g] === null)
+      ? el('div', { class:'msg err', style:'margin:10px 0 18px;padding:14px' },
+          'Desglose no disponible en estas sedes: ' + sedesOk().filter(s => (!ids || ids.includes(s.id)) && !(st.conteos[s.id] && st.conteos[s.id].versionConteos === 1)).map(s => s.nombre + ' (' + (st.errConteos[s.id] || 'respuesta sin contadores') + ')').join('; ') + '. Comprueba que el código CRM_TBS_AppsScript_UNICO_CORREGIDO.gs esté publicado en la implementación existente de cada sede.')
+      : null),
 
     el('div', { class:'panel' },
       el('h3', {}, 'Movimiento de leads y llamadas'),
@@ -560,8 +564,6 @@ function vistaDatos(a, titulo, ids) {
         barras({
           'Contestó': a.contestadas,
           'No contestó': a.noContestadas,
-          'Volver a llamar': a.volverALlamar,
-          'Reprogramada': reprog,
           'Pendiente': a.pend,
           'Se inscribió': a.inscritos,
           'No interesado': a.noInteresados
@@ -682,8 +684,8 @@ function vistaCalendario() {
 /* ═══════════════ CRM: personas, cola de llamadas y seguimiento ═══════════════ */
 const sedesOk = () => SEDES.filter(s => !st.sinAcceso[s.id]);
 const TEMPS = ['Caliente', 'Tibio', 'Frío'];
-const EST_LL = ['Pendiente', 'Contestó', 'No contestó', 'Volver a llamar', 'Se inscribió', 'No interesado'];
-const RESULT = ['', 'Sigue curioso', 'Interesado', 'Interesado en inscribirse', 'Se inscribió', 'No interesado', 'Reprogramar contacto'];
+const EST_LL = ['Pendiente', 'Contestó', 'No contestó', 'Se inscribió', 'No interesado'];
+const RESULT = ['', 'Sigue curioso', 'Interesado', 'Interesado en inscribirse', 'Se inscribió', 'No interesado'];
 const sedePorId = id => SEDES.find(x => x.id === id);
 const COLOR_SEDE = { lapaz:'#2563eb', elalto:'#ea580c', potosi:'#7c3aed', scz:'#0d9488' };
 const colorSede = id => COLOR_SEDE[id] || '#64748b';
@@ -720,6 +722,20 @@ function prep(l, s) {
   l.sinNombre = !l.nombre || /^(no identificado|desconocido|sin nombre)$/i.test(l.nombre);
   return l;
 }
+async function loadConteos() {
+  await Promise.allSettled(sedesOk().map(async s => {
+    try {
+      const j = await apiSede(s, { crm:'conteos' }, 25000);
+      if (j.versionConteos !== 1 || !j.totales) throw new Error('El servidor no tiene crm=conteos publicado');
+      st.conteos[s.id] = j;
+      delete st.errConteos[s.id];
+    } catch(e) {
+      delete st.conteos[s.id];
+      st.errConteos[s.id] = e.message || 'No disponible';
+    }
+  }));
+  renderSuave();
+}
 async function loadLeads() {
   if (st.cargandoLeads || !getKey()) return;
   st.cargandoLeads = true;
@@ -743,26 +759,103 @@ const todos = ids => sedesOk().filter(s => !ids || ids.includes(s.id)).flatMap(s
 const findLead = key => todos().find(l => l.key === key);
 const cerrado = l => l.inscrito || l.noInt || l.baja || /^(inscrito|no interesado)$/i.test(l.estadoLead) || ['Se inscribió', 'No interesado'].includes(l.ll) || ['Se inscribió', 'No interesado'].includes(l.res);
 const sinLlamar = l => !l.ll || l.ll === 'Pendiente';
-const enCola = l => {
-  if (cerrado(l)) return false;
-  const h = hoyISO();
-  if (l.prox) return l.prox <= h;                               // reprogramada: aparece solo cuando llega su fecha (hoy o atrasada)
-  return ['', 'Pendiente', 'Volver a llamar'].includes(l.ll || ''); // "No contestó" sin fecha = intentos hechos, sin interés: no figura
-};
-// Ya hubo un primer contacto y quedó con fecha futura: cuenta como llamada hecha, no como pendiente
-const reprogramada = l => !cerrado(l) && !sinLlamar(l) && !!l.prox && l.prox > hoyISO();
+// Una persona solo queda pendiente mientras no tenga ningún intento registrado.
+const enCola = l => !cerrado(l) && sinLlamar(l);
 const fechaLarga = iso => iso ? corto(iso) : '';
 const rankTemp = l => ({ Caliente:0, Tibio:1, '':2, 'Frío':3 })[l.temp] ?? 2;
 const cola = () => todos().filter(enCola).sort((a, b) => rankTemp(a) - rankTemp(b) || b.score - a.score);
-const alertas = ids => todos(ids).filter(l => !cerrado(l) && sinLlamar(l) && (l.temp === 'Caliente' || l.score >= 75) && (l.dias || 0) >= 1).sort((a, b) => b.dias - a.dias);
-
+// Clasificar únicamente con información identificable que realmente devuelve Apps Script.
+// Si falta la categoría en el JSON de Sheets, NO atribuir todas las llamadas a "Leads".
+const campoLead = (l, nombres) => {
+  for (const k of Object.keys(l || {})) {
+    if (nombres.includes(normTxt(k).replace(/ /g,'')) && l[k] !== null && l[k] !== undefined && String(l[k]).trim() !== '') return l[k];
+  }
+  return '';
+};
+const grupoLlamada = l => {
+  const cat = campoLead(l, ['tipollamada','categoriallamada','grupollamada','areallamada','origenllamada','segmentollamada','tipoatencion','departamento','equipo','responsable','canal','fuente','origen','clasificacion','tipolead']);
+  const texto = normTxt(cat);
+  if (/call center|callcenter|centro de llamadas|telemarketing|operador|contact center/.test(texto)) return 'callcenter';
+  if (/lead calificado|leads calificados|calificado|calificados|qualified/.test(texto)) return 'calificados';
+  if (/^lead$|^leads$|lead nuevo|lead regular|lead sin calificar/.test(texto)) return 'leads';
+  const flag = campoLead(l, ['calificado','escalificado','leadcalificado','qualified']);
+  if (flag === true || flag === 1 || /^(si|s|true|1|yes)$/.test(normTxt(flag))) return 'calificados';
+  if (flag === false || flag === 0 || /^(no|false|0)$/.test(normTxt(flag))) return 'leads';
+  // Temperatura, score, estado de llamada y número telefónico no indican origen.
+  return 'sin_clasificar';
+};
+// Si el servidor devuelve contadores agrupados explícitos, se priorizan sobre
+// los leads individuales, que pueden estar recortados y no guardan cada intento.
+// El resumen del Apps Script contiene los totales exactos por cada hoja.
+// NO exigir campos de llamadas en días sin llamadas: esos campos no existen
+// hasta que la hoja tiene una llamada fechada en ese día.
+// Lee primero el endpoint directo de las hojas; no depende del dashboard anterior.
+const contadorExterno = (ids, grupo) => {
+  const sedes = sedesOk().filter(s => !ids || ids.includes(s.id));
+  if (!sedes.length) return null;
+  const campo = {leads:'llamadasLeads',calificados:'llamadasCalificados',callcenter:'llamadasCallCenter'}[grupo];
+  let total = 0, recientes = 0;
+  let soloPeriodo = false;
+  for (const sede of sedes) {
+    const datos = st.data[sede.id];
+    if (!datos) return null;
+    const conteos = st.conteos && st.conteos[sede.id];
+    if (conteos && conteos.versionConteos === 1) {
+      const v = Number((conteos.totales || {})[campo]);
+      if (!Number.isFinite(v)) return null;
+      total += v;
+      recientes += Number(((conteos.periodos || {})[String(st.dias)] || {})[campo]) || 0;
+      continue;
+    }
+    const camposTotales = datos.totales || {};
+    const acumulado = camposTotales[campo];
+    if (acumulado !== undefined && acumulado !== null && acumulado !== '' && Number.isFinite(Number(acumulado))) {
+      total += Number(acumulado);
+    } else {
+      // Compatibilidad con despliegues que incluyen desglose diario pero
+      // omiten los acumulados. Nunca llamar acumulado a un total parcial.
+      const dias = Object.values(datos.dias || {});
+      const conCampo = dias.filter(d => Object.prototype.hasOwnProperty.call(d,campo));
+      if (!conCampo.length) return null;
+      const sumaDias = conCampo.reduce((n,d)=> n + (Number(d[campo]) || 0),0);
+      // Un bloque de días inicializados a cero no prueba que el desglose funcione.
+      if (sumaDias === 0) return null;
+      total += sumaDias;
+      soloPeriodo = true;
+    }
+    for (const fecha of rango(st.dias)) {
+      const dia = (datos.dias || {})[fecha];
+      if (dia) recientes += Number(dia[campo]) || 0;
+    }
+  }
+  return { total, recientes, soloPeriodo };
+};
+const diagnosticoResumen = ids => sedesOk().filter(s => !ids || ids.includes(s.id)).map(s => {
+  const j = st.data[s.id] || {};
+  const t = j.totales || {};
+  const claves = ['llamadasLeads','llamadasCalificados','llamadasCallCenter'];
+  const dias = Object.values(j.dias || {});
+  const diasConDesglose = dias.filter(d => claves.some(k => Object.prototype.hasOwnProperty.call(d,k))).length;
+  return `${s.nombre}: los contadores acumulados recibidos son [${claves.filter(k => Object.prototype.hasOwnProperty.call(t,k)).join(', ') || 'ninguno'}]; días con desglose: ${diasConDesglose}; campos del resumen: [${Object.keys(t).join(', ')}].`;
+}).join(' ');
+const resumenLlamadas = ids => {
+  const registros = llamadasHechas(ids), n = {leads:null,calificados:null,callcenter:null,sin_clasificar:0};
+  const recientes = {};
+  registros.forEach(l => { if (grupoLlamada(l) === 'sin_clasificar') n.sin_clasificar++; });
+  for (const g of ['leads','calificados','callcenter']) {
+    const dato = contadorExterno(ids,g);
+    if (dato !== null) { n[g] = dato.total; recientes[g] = dato.recientes; }
+  }
+  n.totalRegistros = registros.length;
+  n.recientes = recientes;
+  return n;
+};
+const llamadasHechas = ids => todos(ids).filter(l => !sinLlamar(l));
+const fechaLlamada = l => l.fllam || l.fechaLlamada || l.fecha_llamada || l.ultimaLlamada || l.fechaUltimaLlamada || l.fechaContacto || l.fecha_contacto || '';
 const tChip = t => el('span', { class:'chip t-' + (t || 'Sin') }, t || 'Sin clasificar');
 const eCls = e => 'chip e e-' + ({ 'Se inscribió':'Inscrito', 'Contestó':'Contestó', 'Volver a llamar':'Volver', 'No contestó':'No', 'No interesado':'No' }[e] || 'x');
 const eChip = e => el('span', { class: !e || e === 'Pendiente' ? 'chip e' : eCls(e) }, e || 'Pendiente');
-// Chip de llamada por persona: si está reprogramada se ve como llamada hecha con nota de fecha
-const llChip = l => reprogramada(l)
-  ? el('span', { class:'chip e e-Volver', title:'Ya se hizo el primer contacto' }, 'Llamada reprogramada · ' + fechaLarga(l.prox))
-  : eChip(l.ll);
+const llChip = l => eChip(l.ll);
 const sedeTag = l =>el('span', { class:'sc', style:'--sc:' + colorSede(l.sede) }, l.sedeNom);
 const nombre = l => l.sinNombre ? el('span', { class:'sn' }, 'Sin nombre') : l.nombre;
 const digitos = t => String(t || '').replace(/\D/g, '');
@@ -771,16 +864,6 @@ const telBtn = l => el('a', { class:'tel', href:'tel:+' + digitos(l.tel), onclic
 const rel = iso => { if (!iso) return ''; const d = diasDesde(iso); return d === 0 ? 'Hoy' : d < 0 ? (d === -1 ? 'Mañana' : 'En ' + (-d) + ' d') : 'Atrasada ' + d + ' d'; };
 const abrir = key => { st.sel = key; render(); };
 function cerrarDetalle() { st.sel = null; st.pend = false; render(); }
-
-function panelAlertas(ids) {
-  if (!st.leadsListo) return '';
-  const al = alertas(ids);
-  return el('div', { class:'panel' }, el('h3', {}, 'Alertas'),
-    el('div', { class:'sub', style:'margin:4px 0 0' }, 'Leads calientes que todavía no tienen su primera llamada'),
-    al.length ? al.slice(0, 5).map(l => el('button', { class:'al', onclick:() => abrir(l.key) },
-      el('span', { class:'d' }, l.dias + 'd'),
-      el('span', {}, el('b', {}, nombre(l)), el('small', {}, l.carr + (sedesOk().length > 1 ? ' · ' + l.sedeNom : ''))))) : el('div', { class:'msg', style:'margin-top:10px' }, 'Sin alertas 🎉'));
-}
 
 // Guarda en la hoja y actualiza la persona con lo que devolvió la sede
 async function guardar(l, cambios, okMsg) {
@@ -858,29 +941,60 @@ function vistaLeads() {
 }
 
 function vistaLlamar() {
-  const c = cola(), multi = sedesOk().length > 1, manana = addDays(hoyISO(), 1);
+  const multi = sedesOk().length > 1;
   const frag = document.createDocumentFragment();
-  frag.append(el('div', { class:'bar' }, el('div', {}, el('h2', {}, 'Llamar hoy'),
-    el('div', { class:'sub' }, st.leadsListo ? `${c.length} en cola · primero los calientes, luego por puntaje del bot` : 'Cargando…'))));
+  frag.append(el('div', { class:'bar' }, el('div', {}, el('h2', {}, 'Control de llamadas'),
+    el('div', { class:'sub' }, 'Pendientes sin llamar e historial de llamadas realizadas · sin reprogramaciones'))));
   if (!st.leadsListo) { frag.append(el('div', { class:'msg' }, 'Cargando personas de las hojas…')); return frag; }
   sedesOk().filter(s => st.errLeads[s.id]).forEach(s => frag.append(el('div', { class:'msg err', style:'margin-bottom:10px' }, `${s.nombre}: ${st.errLeads[s.id]}`)));
-  if (!c.length) { frag.append(el('div', { class:'msg' }, 'Cola vacía. ¡Buen trabajo! 🎉')); return frag; }
-  c.slice(0, 15).forEach(l => {
+  const realizadas = llamadasHechas();
+  const resumen = resumenLlamadas(null);
+  const grupos = [ ['leads','Llamadas a leads','var(--leads)'], ['calificados','Llamadas a leads calificados','var(--brand2)'], ['callcenter','Call Center','var(--call)'] ];
+  if (!st.grupoLlamadas) st.grupoLlamadas = 'leads';
+  frag.append(el('div', { class:'kpis' },
+    ...grupos.map(([g,n,color]) => {
+      const cantidad = resumen[g];
+      return el('button', { class:'kpi', style:'--c:' + color + ';text-align:left', 'aria-pressed':String(st.grupoLlamadas === g), onclick:() => { st.grupoLlamadas = g; render(); } },
+        el('div', { class:'lbl' }, n), el('div', { class:'num' }, cantidad === null ? '—' : String(cantidad)), el('div', { class:'sub' }, cantidad === null ? 'Sin desglose disponible en esta sede' : 'Realizadas · ver lista'));
+    }),
+    el('div', { class:'kpi', style:'--c:var(--ok)' }, el('div', { class:'lbl' }, 'Total de llamadas'),
+      el('div', { class:'num' }, String(['leads','calificados','callcenter'].every(g => resumen[g] !== null) ? resumen.leads + resumen.calificados + resumen.callcenter : '—')), el('div', { class:'sub' }, 'Suma histórica de las tres hojas'))));
+  const grupo = st.grupoLlamadas;
+  const pendientes = cola().filter(l => grupoLlamada(l) === grupo);
+  const hayHistorialExacto = sedesOk().every(s => st.conteos[s.id] && st.conteos[s.id].versionConteos === 1);
+  const hechas = hayHistorialExacto ? sedesOk().flatMap(s => (st.conteos[s.id].historial || [])
+    .filter(h => h.grupo === grupo).map(h => ({
+      nombre:h.nombre || 'Sin nombre', sedeNom:s.nombre, ll:h.estado,
+      fllam:h.fecha, key:s.id + '|' + h.tel, tel:h.tel, sinNombre:!h.nombre
+    }))) : realizadas.filter(l => grupoLlamada(l) === grupo);
+  const titulo = grupos.find(g => g[0] === grupo)[1];
+  if (resumen.sin_clasificar) frag.append(el('div', { class:'msg', style:'margin-top:12px' }, resumen.sin_clasificar + ' contactos del historial unificado no tienen categoría. Los contadores superiores se obtienen directamente de cada hoja de Google Sheets cuando la sede dispone del Apps Script actualizado.')); 
+  frag.append(el('div', { class:'panel' }, el('h3', {}, titulo + ' · pendientes sin llamar (' + pendientes.length + ')'),
+    el('div', { class:'sub', style:'margin:7px 0 13px' }, 'Solo personas que todavía no tienen una llamada registrada')));
+  if (!pendientes.length) frag.append(el('div', { class:'msg' }, 'No hay llamadas pendientes en esta categoría.'));
+  pendientes.slice(0, 30).forEach(l => {
     const bus = !!st.guardando[l.key];
-    const b = (cls, txt, cambios, ok) => el('button', { class:cls, disabled:bus ? '' : null, onclick:() => guardar(l, cambios, ok) }, txt);
+    const b = (cls, txt, estado) => el('button', { class:cls, disabled:bus ? '' : null,
+      onclick:() => guardar(l, { estado, proxima:'' }, 'Llamada registrada: ' + estado) }, txt);
     frag.append(el('div', { class:'q', style:'--sc:' + (multi ? colorSede(l.sede) : 'var(--cold)') },
       el('div', { class:'av' }, l.sinNombre ? '?' : l.nombre[0].toUpperCase()),
       el('div', {}, el('h4', { onclick:() => abrir(l.key) }, nombre(l)),
-        el('div', { class:'m' }, tChip(l.temp), l.prox && !sinLlamar(l) ? el('span', { class:'chip e e-Volver' }, 'Llamada reprogramada · ' + rel(l.prox)) : eChip(l.ll), el('span', {}, 'Score ' + l.score),
-          l.prox && sinLlamar(l) ? el('b', { style:'color:var(--call)' }, rel(l.prox)) : null,
-          el('span', {}, l.carr.length > 30 ? l.carr.slice(0, 28) + '…' : l.carr), multi ? sedeTag(l) : null, el('span', {}, l.tel))),
+        el('div', { class:'m' }, tChip(l.temp), eChip(l.ll), el('span', {}, 'Score ' + l.score),
+          el('span', {}, l.carr), multi ? sedeTag(l) : null, el('span', {}, l.tel))),
       el('div', { class:'acts' }, telBtn(l), waBtn(l),
-        b('ok', 'Contestó', { estado:'Contestó', proxima:'' }, 'Marcado: contestó'),
-        b('no', 'No contestó', { estado:'No contestó', proxima:manana }, 'No contestó · se reintenta mañana'),
-        b('rl', 'Volver a llamar', { estado:'Volver a llamar', proxima:manana }, 'Se volverá a llamar mañana'),
-        b('ok', 'Se inscribió', { estado:'Se inscribió' }, '¡Se inscribió!'))));
+        b('ok', 'Contestó', 'Contestó'), b('no', 'No contestó', 'No contestó'),
+        b('ok', 'Se inscribió', 'Se inscribió'), b('no', 'No interesado', 'No interesado'))));
   });
-  if (c.length > 15) frag.append(el('div', { class:'foot' }, `Mostrando las 15 primeras de ${c.length}. Al atender estas, aparecen las siguientes.`));
+  if (pendientes.length > 30) frag.append(el('div', { class:'foot' }, 'Mostrando 30 de ' + pendientes.length + ' pendientes.'));
+  frag.append(el('div', { class:'panel scroll' }, el('h3', {}, 'Historial de ' + titulo.toLowerCase() + ' (' + hechas.length + ')'),
+    el('div', { class:'sub', style:'margin:7px 0 12px' }, 'Historial de contactos consolidados por teléfono. Las tarjetas muestran acumulados por cada hoja; no se duplican por días.'),
+    hechas.length ? el('table', {}, el('thead', {}, el('tr', {},
+      ['Persona','Sede','Resultado','Fecha de llamada'].map(t => el('th', {}, t)))),
+      el('tbody', {}, hechas.slice().sort((a,b) => String(fechaLlamada(b)).localeCompare(String(fechaLlamada(a)))).slice(0, 150).map(l =>
+        el('tr', { onclick:() => abrir(l.key), style:'cursor:pointer' },
+          el('td', {}, nombre(l)), el('td', {}, l.sedeNom), el('td', {}, l.ll || '—'),
+          el('td', {}, fechaLlamada(l) ? String(fechaLlamada(l)).slice(0,10) : 'Fecha no disponible'))))) :
+      el('div', { class:'msg' }, 'Todavía no hay llamadas registradas en esta categoría.')));
   return frag;
 }
 
@@ -890,7 +1004,6 @@ function vistaDetalle() {
   const mk = (arr, v, lab) => el('select', { 'aria-label':lab }, arr.map(o => { const x = el('option', { value:o }, o || '—'); if (o === v) x.selected = true; return x; }));
   const nom = el('input', { type:'text', maxlength:'80', placeholder:'Escribe el nombre real', 'aria-label':'Nombre', value:l.sinNombre ? '' : l.nombre });
   const ell = mk(EST_LL, l.ll || 'Pendiente', 'Estado de llamada'), rs = mk(RESULT, l.res, 'Resultado'), tp = mk(['', ...TEMPS], l.temp, 'Temperatura');
-  const px = el('input', { type:'date', 'aria-label':'Próxima llamada', value:l.prox || '' });
   const ta = el('textarea', { maxlength:'500', placeholder:'Observación… (ej. pidió que la llamen el sábado)', 'aria-label':'Nueva observación' });
   const btn = el('button', { class:'save', disabled:st.guardando[l.key] ? '' : null }, 'Guardar en la hoja');
   btn.addEventListener('click', async () => {
@@ -900,7 +1013,6 @@ function vistaDetalle() {
     if (ell.value !== (l.ll || 'Pendiente')) c.estado = ell.value;
     if (rs.value !== (l.res || '')) c.resultado = rs.value;
     if (tp.value !== (l.temp || '')) c.temp = tp.value;
-    if (px.value !== (l.prox || '')) c.proxima = px.value;
     if (ta.value.trim()) c.obs = ta.value.trim();
     if (!Object.keys(c).length) { toast('No hay cambios para guardar'); return; }
     btn.disabled = true; btn.textContent = 'Guardando…';
@@ -919,7 +1031,7 @@ function vistaDetalle() {
         el('span', {}, 'Ingresó'), el('span', {}, l.primer ? corto(l.primer) + ' (hace ' + l.dias + ' d)' : '—'), el('span', {}, 'Nombre'), nom),
       l.sinNombre ? el('div', { class:'sub', style:'margin:-6px 0 8px' }, 'El bot no obtuvo el nombre. Al guardarlo se escribe en la hoja de ' + l.sedeNom + ' y reemplaza "No identificado".') : null,
       l.resumen ? el('div', { class:'resumen' }, el('small', {}, 'Resumen del bot'), l.resumen) : null,
-      el('div', { class:'f' }, el('span', {}, 'Estado de llamada'), ell, el('span', {}, 'Resultado'), rs, el('span', {}, 'Temperatura'), tp, el('span', {}, 'Próxima llamada'), px),
+      el('div', { class:'f' }, el('span', {}, 'Estado de llamada'), ell, el('span', {}, 'Resultado'), rs, el('span', {}, 'Temperatura'), tp),
       el('h3', { style:'margin:6px 0 8px;font-size:16px' }, 'Observaciones'),
       l.obs ? el('div', { class:'obs' }, l.obs) : null, ta,
       el('div', { style:'margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, btn,
