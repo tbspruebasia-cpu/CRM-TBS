@@ -911,7 +911,17 @@ async function guardar(l, cambios, okMsg) {
   st.guardando[l.key] = true;
   if (!st.sel) render();
   try {
-    const j = await apiSede(s, { crm:'guardar', tel:l.tel, ...cambios });
+    // Fecha y hora de la llamada (hora de Bolivia) cuando se registra un estado/resultado de llamada
+    const extra = {};
+    if (cambios.estado !== undefined || cambios.resultado !== undefined) {
+      const ahora = new Date();
+      const f = new Intl.DateTimeFormat('en-CA', { timeZone:'America/La_Paz' }).format(ahora);
+      const h = new Intl.DateTimeFormat('en-GB', { timeZone:'America/La_Paz', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false }).format(ahora);
+      extra.fechaLlamada = f;
+      extra.horaLlamada = h;
+      extra.fechaHoraLlamada = f + ' ' + h;
+    }
+    const j = await apiSede(s, { crm:'guardar', tel:l.tel, ...cambios, ...extra });
     if (j.lead) {
       const lista = st.leads[l.sede] || [], i = lista.findIndex(x => x.tel === l.tel);
       const nuevo = prep(j.lead, s);
