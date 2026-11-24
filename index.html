@@ -313,12 +313,14 @@ async function loadSede(s) {
 async function loadAll() {
   if (st.cargando || !getKey()) return;
   st.cargando = true;
+  leerCacheInsc();   // muestra al instante los últimos inscritos conocidos
   renderSuave(); // interfaz inmediata
+  const pInsc = loadInsc();   // arranca YA, en paralelo con las sedes (antes esperaba a que todas cargaran)
   await Promise.allSettled(SEDES.map(loadSede));
   if (SEDES.every(s => st.sinAcceso[s.id])) {   // el código no abre NINGUNA sede: es incorrecto
     clearKey(); st.claveMala = true; reiniciarDatos(); st.cargando = false; render(); return;
   }
-  await Promise.allSettled([loadLeads(), loadInsc(), loadConteos()]);
+  await Promise.allSettled([loadLeads(), pInsc, loadConteos()]);
   st.cargando = false;
   st.ult = new Date();
   renderSuave();
@@ -404,18 +406,25 @@ function kpi(num, lbl, color) { return el('div', { class:'kpi', style: color ? `
 
 /* ═══ METAS: inscritos = personas marcadas "Se inscribió" (solo cuando ya pagaron la cuota) ═══ */
 const esInscrito = l => !!l.inscrito || l.ll === 'Se inscribió' || l.res === 'Se inscribió' || /^inscrito$/i.test(l.estadoLead || '');
+const CACHE_INSC = 'dash_insc_cache';
+function guardarCacheInsc() { try { localStorage.setItem(CACHE_INSC, JSON.stringify({ i:st.insc, c:st.inscCarr })); } catch {} }
+function leerCacheInsc() { if (st.insc) return; try { const j = JSON.parse(localStorage.getItem(CACHE_INSC) || 'null'); if (j && j.i) { st.insc = j.i; st.inscCarr = j.c || null; } } catch {} }
 async function loadInsc() {
   if (!INSCRITOS_URL || !getKey()) return;
-  // Prueba la URL tal cual y, si falla, su forma pública (sin /a/macros/dominio)
+  // Prueba la URL tal cual y, si falla, su forma pública (sin /a/macros/dominio). Hasta 3 intentos y 40 s por intento:
+  // el script de inscripciones es lento y compite con las sedes, el límite normal de 7 s lo cortaba.
   const urls = [INSCRITOS_URL, INSCRITOS_URL.replace(/\/a\/macros\/[^/]+\//, '/macros/')].filter((u, i, a) => a.indexOf(u) === i);
   let ultimo = '';
-  for (const u of urls) {
-    try {
-      const r = await fetchConTimeout(`${u}?inscritos=1&key=${encodeURIComponent(getKey())}&_=${Date.now()}`);
-      let j; try { j = JSON.parse(await r.text()); } catch { throw new Error('La URL no devolvió datos (revisa el acceso de la implementación)'); }
-      if (!j.ok) throw new Error(j.error || 'Error');
-      st.insc = j.inscritos; st.inscCarr = Array.isArray(j.carreras) ? j.carreras : null; st.inscErr = null; renderSuave(); return;
-    } catch (e) { ultimo = e.name === 'AbortError' ? 'Tiempo de espera agotado' : (e.message === 'Failed to fetch' ? 'sin permiso de acceso a la URL' : e.message || 'Error'); }
+  for (let intento = 0; intento < 3; intento++) {
+    for (const u of urls) {
+      try {
+        const r = await fetchConTimeout(`${u}?inscritos=1&key=${encodeURIComponent(getKey())}&_=${Date.now()}`, 40000);
+        let j; try { j = JSON.parse(await r.text()); } catch { throw new Error('La URL no devolvió datos (revisa el acceso de la implementación)'); }
+        if (!j.ok) throw new Error(j.error || 'Error');
+        st.insc = j.inscritos; st.inscCarr = Array.isArray(j.carreras) ? j.carreras : null; st.inscErr = null; guardarCacheInsc(); renderSuave(); return;
+      } catch (e) { ultimo = e.name === 'AbortError' ? 'Tiempo de espera agotado' : (e.message === 'Failed to fetch' ? 'sin permiso de acceso a la URL' : e.message || 'Error'); }
+    }
+    await new Promise(r => setTimeout(r, 1500));
   }
   st.inscErr = ultimo;
   renderSuave();
@@ -423,10 +432,7 @@ async function loadInsc() {
 function inscritosSede(s) {
   if (st.insc && st.insc[s.id] != null) return Number(st.insc[s.id]); // automático desde la hoja
   if (INSCRITOS_MANUAL && INSCRITOS_MANUAL[s.id] != null) return Number(INSCRITOS_MANUAL[s.id]); // manual
-  const lista = st.leads[s.id];
-  if (st.leadsListo && lista && !st.recortado[s.id]) return lista.filter(esInscrito).length; // refleja al instante lo que marca el equipo
-  const d = st.data[s.id];
-  return d && d.totales ? Number(d.totales.inscritos || 0) : 0;
+  return 0; // los inscritos solo vienen de la hoja de inscripciones (cuota pagada), nunca del estado del lead
 }
 function filasMetas(ids) {
   return sedesOk().filter(s => !ids || ids.includes(s.id)).map(s => {
@@ -448,7 +454,7 @@ function panelMetas(ids) {
   const meta = f.reduce((a, x) => a + x.meta, 0), ins = f.reduce((a, x) => a + x.ins, 0);
   const pct = meta ? Math.round(100 * ins / meta) : 0;
   return el('div', { class:'panel' }, el('h3', {}, 'Meta de inscritos'),
-    el('div', { class:'sub', style:'margin:4px 0 8px' }, st.insc ? 'Inscritos confirmados según la hoja TBS_INSCRIPCIONES (pestaña NACIONAL)' : INSCRITOS_MANUAL ? 'Inscritos confirmados según la hoja TBS_INSCRIPCIONES · actualizado el ' + INSCRITOS_FECHA : st.inscErr ? 'No se pudo leer la hoja de inscripciones (' + st.inscErr + '). Mostrando "Se inscribió".' : st.leadsListo ? 'Cuenta solo a quienes ya pagaron su cuota y fueron marcados "Se inscribió"' : 'Cargando inscritos…'),
+    el('div', { class:'sub', style:'margin:4px 0 8px' }, st.insc ? (st.inscErr ? '⚠ No se pudo actualizar la hoja de inscripciones (' + st.inscErr + '). Se muestra el último dato guardado.' : 'Inscritos confirmados según la hoja TBS_INSCRIPCIONES (pestaña NACIONAL)') : st.inscErr ? '⚠ No se pudo leer la hoja de inscripciones (' + st.inscErr + '). Mostrando el respaldo manual del ' + INSCRITOS_FECHA + ', que puede estar desactualizado.' : INSCRITOS_MANUAL ? 'Inscritos confirmados según la hoja TBS_INSCRIPCIONES · actualizado el ' + INSCRITOS_FECHA : st.inscErr ? 'No se pudo leer la hoja de inscripciones (' + st.inscErr + '). Mostrando "Se inscribió".' : st.leadsListo ? 'Cuenta solo a quienes ya pagaron su cuota y fueron marcados "Se inscribió"' : 'Cargando inscritos…'),
     f.length > 1 ? filaMeta('Total ' + f.length + ' sedes', ins, meta, pct, Math.max(0, meta - ins), true) : '',
     f.map(x => filaMeta(x.s.nombre, x.ins, x.meta, x.pct, x.faltan, false)));
 }
@@ -494,6 +500,37 @@ function panelCarreras() {
       el('tfoot', {}, el('tr', {}, el('td', {}, 'Total'), ...colT.map(n => el('td', {}, String(n))), el('td', {}, String(tot)), el('td', {}, tot ? '100%' : '0%')))));
 }
 
+/* ═══ EMBUDO DE LEADS: cada persona en un solo estado → la suma de estados = total de leads ═══ */
+function embudoSede(s) {
+  const t = (st.data[s.id] && st.data[s.id].totales) || {};
+  const n = k => Number(t[k] || 0);
+  const f = { pend:n('pendientes'), cont:n('contestadas'), nocont:n('noContestadas'), noint:n('noInteresados'), volver:n('volverALlamar'), otros:n('otros') };
+  f.total = f.pend + f.cont + f.nocont + f.noint + f.volver + f.otros;
+  const lista = st.leads[s.id];
+  f.enHoja = (st.leadsListo && lista && !st.recortado[s.id]) ? lista.length : null; // solo si la lista no está recortada
+  return f;
+}
+function embudoFilas(ids) { return sedesOk().filter(s => (!ids || ids.includes(s.id)) && st.data[s.id]).map(s => ({ s, f:embudoSede(s) })); }
+function embudoTotal(filas) {
+  const z = { pend:0, cont:0, nocont:0, noint:0, volver:0, otros:0, total:0 };
+  filas.forEach(({ f }) => { for (const k in z) z[k] += f[k]; });
+  return z;
+}
+function panelEmbudo(ids) {
+  const filas = embudoFilas(ids);
+  if (!filas.length) return '';
+  const tot = embudoTotal(filas);
+  const hayOtros = tot.otros > 0;
+  const celdas = f => [f.pend, f.cont, f.nocont, f.noint, f.volver, ...(hayOtros ? [f.otros] : [])].map(v => el('td', {}, String(v)));
+  const check = f => f.enHoja === null ? el('td', {}, '—') : f.enHoja === f.total ? el('td', { style:'color:var(--ok);font-weight:700' }, '✓') : el('td', { class:'err', title:'Leads en la hoja: ' + f.enHoja }, (f.total - f.enHoja > 0 ? '+' : '') + (f.total - f.enHoja));
+  const verTot = filas.every(x => x.f.enHoja !== null) ? (filas.every(x => x.f.enHoja === x.f.total) ? el('td', { style:'color:var(--ok);font-weight:700' }, '✓') : el('td', { class:'err' }, 'Revisar')) : el('td', {}, '—');
+  return el('div', { class:'panel scroll' }, el('h3', {}, 'Embudo de leads por sede'),
+    el('table', { style:'margin-top:10px' },
+      el('thead', {}, el('tr', {}, ['Sede','Pendientes','Contestó','No contestó','No interesados','Volver a llamar', ...(hayOtros ? ['Estado no reconocido'] : []), 'Total leads','Cuadra con la hoja'].map(h => el('th', {}, h)))),
+      el('tbody', {}, filas.map(({ s, f }) => el('tr', {}, el('td', {}, s.nombre), ...celdas(f), el('td', { style:'font-weight:700' }, String(f.total)), check(f)))),
+      filas.length > 1 ? el('tfoot', {}, el('tr', {}, el('td', {}, 'Total'), ...celdas(tot), el('td', {}, String(tot.total)), verTot)) : null));
+}
+
 function vistaDatos(a, titulo, ids) {
   const frag = document.createDocumentFragment();
 
@@ -528,6 +565,8 @@ function vistaDatos(a, titulo, ids) {
       kpi(a.contestadas, 'Llamadas contestadas', 'var(--ok)'),
       kpi(a.noContestadas, 'No contestadas', 'var(--bad)'),
       kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
+      kpi(a.noInteresados, 'No interesados', 'var(--bad)'),
+      kpi(embudoTotal(embudoFilas(ids)).total, 'Total de leads · acumulado', 'var(--brand)'),
       kpi(conteo('leads'), 'Llamadas a leads', 'var(--leads)'),
       kpi(conteo('calificados'), 'Llamadas a leads calificados', 'var(--brand2)'),
       kpi(conteo('callcenter'), 'Llamadas Call Center', 'var(--call)'),
@@ -537,6 +576,7 @@ function vistaDatos(a, titulo, ids) {
       kpi(mf.meta ? `${mf.ins} / ${mf.meta}` : '—', `Meta de inscritos · ${mf.meta ? Math.round(100 * mf.ins / mf.meta) : 0}%`, 'var(--brand2)')
     ),
 
+    panelEmbudo(ids),
     panelMetas(ids),
     (['leads','calificados','callcenter'].some(g => resumen[g] === null)
       ? el('div', { class:'msg err', style:'margin:10px 0 18px;padding:14px' },
@@ -565,7 +605,6 @@ function vistaDatos(a, titulo, ids) {
           'Contestó': a.contestadas,
           'No contestó': a.noContestadas,
           'Pendiente': a.pend,
-          'Se inscribió': a.inscritos,
           'No interesado': a.noInteresados
         }, 'linear-gradient(90deg,var(--call),#f59e0b)')
       )
@@ -595,7 +634,7 @@ function tablaSedes() {
     el('table', { style:'margin-top:10px' },
       el('thead', {},
         el('tr', {},
-          ['Sede','Leads','Calificados','Conv.','Contestadas','No contestadas','Volver a llamar','Pendientes','Inscritos']
+          ['Sede','Leads','Calificados','Conv.','Contestadas','No contestadas','Volver a llamar','Pendientes','No interesados','Inscritos']
             .map(h => el('th', {}, h))
         )
       ),
@@ -612,9 +651,10 @@ function tablaSedes() {
                   a.noContestadas,
                   a.volverALlamar,
                   a.pend,
+                  a.noInteresados,
                   inscritosSede(s)
                 ].map(v => el('td', {}, String(v)))
-              : [el('td', { colspan:8, class:'err' }, st.err[s.id] || '—')]
+              : [el('td', { colspan:9, class:'err' }, st.err[s.id] || '—')]
             )
           )
         )
@@ -684,8 +724,8 @@ function vistaCalendario() {
 /* ═══════════════ CRM: personas, cola de llamadas y seguimiento ═══════════════ */
 const sedesOk = () => SEDES.filter(s => !st.sinAcceso[s.id]);
 const TEMPS = ['Caliente', 'Tibio', 'Frío'];
-const EST_LL = ['Pendiente', 'Contestó', 'No contestó', 'Se inscribió', 'No interesado'];
-const RESULT = ['', 'Sigue curioso', 'Interesado', 'Interesado en inscribirse', 'Se inscribió', 'No interesado'];
+const EST_LL = ['Pendiente', 'Contestó', 'No contestó', 'No interesado']; // "Se inscribió" ya no se marca aquí: los inscritos salen solo de la hoja de pagos
+const RESULT = ['', 'Sigue curioso', 'Interesado', 'Interesado en inscribirse', 'No interesado'];
 const sedePorId = id => SEDES.find(x => x.id === id);
 const COLOR_SEDE = { lapaz:'#2563eb', elalto:'#ea580c', potosi:'#7c3aed', scz:'#0d9488' };
 const colorSede = id => COLOR_SEDE[id] || '#64748b';
@@ -983,7 +1023,7 @@ function vistaLlamar() {
           el('span', {}, l.carr), multi ? sedeTag(l) : null, el('span', {}, l.tel))),
       el('div', { class:'acts' }, telBtn(l), waBtn(l),
         b('ok', 'Contestó', 'Contestó'), b('no', 'No contestó', 'No contestó'),
-        b('ok', 'Se inscribió', 'Se inscribió'), b('no', 'No interesado', 'No interesado'))));
+        b('no', 'No interesado', 'No interesado'))));
   });
   if (pendientes.length > 30) frag.append(el('div', { class:'foot' }, 'Mostrando 30 de ' + pendientes.length + ' pendientes.'));
   frag.append(el('div', { class:'panel scroll' }, el('h3', {}, 'Historial de ' + titulo.toLowerCase() + ' (' + hechas.length + ')'),
@@ -1003,7 +1043,8 @@ function vistaDetalle() {
   if (!l) return null;
   const mk = (arr, v, lab) => el('select', { 'aria-label':lab }, arr.map(o => { const x = el('option', { value:o }, o || '—'); if (o === v) x.selected = true; return x; }));
   const nom = el('input', { type:'text', maxlength:'80', placeholder:'Escribe el nombre real', 'aria-label':'Nombre', value:l.sinNombre ? '' : l.nombre });
-  const ell = mk(EST_LL, l.ll || 'Pendiente', 'Estado de llamada'), rs = mk(RESULT, l.res, 'Resultado'), tp = mk(['', ...TEMPS], l.temp, 'Temperatura');
+  const conActual = (arr, v) => (v && !arr.includes(v)) ? [...arr, v] : arr; // conserva un valor antiguo (p. ej. "Se inscribió") para no cambiarlo sin querer al guardar
+  const ell = mk(conActual(EST_LL, l.ll || 'Pendiente'), l.ll || 'Pendiente', 'Estado de llamada'), rs = mk(conActual(RESULT, l.res), l.res, 'Resultado'), tp = mk(['', ...TEMPS], l.temp, 'Temperatura');
   const ta = el('textarea', { maxlength:'500', placeholder:'Observación… (ej. pidió que la llamen el sábado)', 'aria-label':'Nueva observación' });
   const btn = el('button', { class:'save', disabled:st.guardando[l.key] ? '' : null }, 'Guardar en la hoja');
   btn.addEventListener('click', async () => {
