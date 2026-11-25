@@ -402,6 +402,139 @@ function barras(obj, color) {
   return el('div', {}, ent.map(([k, v]) => el('div', { class:'row' }, el('span', { title:k }, k), el('div', { class:'track' }, el('div', { class:'fill', style:`width:${100 * v / m}%;${color ? 'background:' + color : ''}` })), el('b', {}, String(v)))));
 }
 
+const UMBRAL_BUENO = 80, UMBRAL_ATENCION = 50; // % de leads llamados: verde / amarillo (menos = rojo). Ajustable.
+
+/* ═══ Control para gerencia: semáforo, camino lead→inscrito, resultado de llamadas y estado por sede ═══ */
+const califAcum = s => { const d = st.data[s.id]; return d ? Object.values(d.dias || {}).reduce((a, x) => a + Number(x.calificados || 0), 0) : 0; };
+const pct1 = (n, d) => d ? (Math.round(1000 * n / d) / 10).toLocaleString('es-BO') + '%' : '—';
+const sedesVis = ids => sedesOk().filter(s => (!ids || ids.includes(s.id)) && st.data[s.id]);
+function pctCalifInsc(ids) { const ss = sedesVis(ids); return pct1(ss.reduce((x, s) => x + inscritosSede(s), 0), ss.reduce((x, s) => x + califAcum(s), 0)); }
+function nivelSemaforo(p) { return p >= UMBRAL_BUENO ? ['#1a9d5b', 'Al día'] : p >= UMBRAL_ATENCION ? ['#d98e04', 'Atención'] : ['#d64545', 'Atrasada']; }
+const ayuda = () => null; // ayudas (?) desactivadas: se explicarán en el informe detallado
+const chip = txt => el('span', { style:'background:rgba(127,127,127,.15);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;white-space:nowrap' }, txt);
+const califTotal = ids => sedesVis(ids).reduce((x, s) => x + califAcum(s), 0);
+const inscTotal = ids => sedesVis(ids).reduce((x, s) => x + inscritosSede(s), 0);
+const CARD = 'border:1px solid var(--line);background:var(--panel);border-radius:20px;padding:24px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:14px;min-width:0';
+const MINI = c => `border:1px solid var(--line);border-top:4px solid ${c};background:rgba(127,127,127,.07);border-radius:16px;padding:18px 20px`;
+// Conciliación: de dónde sale cada total (período / anteriores / sin fecha) y si la suma de estados coincide con el total de personas de la hoja
+function conciliacion(ids) {
+  const js = sedesVis(ids).map(s => st.data[s.id]), f = embudoTotal(embudoFilas(ids));
+  const l30 = agg(js, st.dias).leads;
+  const conFecha = js.reduce((x, j) => x + Object.values(j.dias || {}).reduce((y, d) => y + Number(d.leads || 0), 0), 0);
+  const hayTot = js.length > 0 && js.every(j => j.totales && j.totales.totalPersonas != null);
+  const totPers = js.reduce((x, j) => x + Number((j.totales || {}).totalPersonas || 0), 0);
+  return { total:f.total, l30, anteriores:Math.max(0, conFecha - l30), sinFecha:Math.max(0, f.total - conFecha), cuadra: hayTot ? totPers === f.total : null };
+}
+function semaforoGeneral(a, ids) {
+  const ft = embudoTotal(embudoFilas(ids));
+  if (!ft.total) return '';
+  const p = Math.round(100 * (ft.total - ft.pend) / ft.total), n = nivelSemaforo(p);
+  const titulo = p >= UMBRAL_BUENO ? 'En ritmo' : p >= UMBRAL_ATENCION ? 'Atención' : 'Atrasado';
+  const atras = sedesVis(ids).filter(s => { const e = embudoSede(s); return nivelSemaforo(e.total ? Math.round(100 * (e.total - e.pend) / e.total) : 0)[1] === 'Atrasada'; }).map(s => s.nombre);
+  return el('div', { class:'panel', style:`border-left:6px solid ${n[0]};margin-top:12px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center` },
+    el('div', { style:`font-weight:800;font-size:22px;color:${n[0]}` }, '● ' + titulo),
+    el('div', { style:'flex:1 1 280px;line-height:1.5;font-size:15px' }, `Cobertura de llamadas: ${p}% de los leads ya tiene al menos una llamada registrada. Pendientes por llamar: ${ft.pend}.`,
+      atras.length ? el('div', { style:'color:#f87171;font-weight:700;margin-top:4px' }, 'Sedes con cobertura baja: ' + atras.join(', ')) : null),
+    ayuda(`Semáforo según la cobertura de llamadas. Verde: ${UMBRAL_BUENO}% o más · Amarillo: ${UMBRAL_ATENCION}% a ${UMBRAL_BUENO - 1}% · Rojo: menos de ${UMBRAL_ATENCION}%`));
+}
+function heroVistazo(a, ids, mf) {
+  const f = embudoTotal(embudoFilas(ids));
+  if (!f.total) return '';
+  const llamados = f.total - f.pend, p = Math.round(100 * llamados / f.total), n = nivelSemaforo(p), cal = califTotal(ids);
+  const preg = (txt, tip) => el('div', { style:'display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;text-transform:uppercase;letter-spacing:.05em' }, txt, ayuda(tip));
+  const pm = mf.meta ? Math.min(100, Math.round(100 * mf.ins / mf.meta)) : 0;
+  const anillo = el('div', { style:`position:relative;width:112px;height:112px;border-radius:50%;flex:none;background:conic-gradient(${n[0]} ${p}%, rgba(127,127,127,.22) 0)` },
+    el('div', { style:'position:absolute;inset:12px;border-radius:50%;background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800' }, p + '%'));
+  return el('div', { style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px;margin-top:16px' },
+    el('div', { style:CARD }, preg('Cobertura de llamadas', 'Porcentaje de leads con al menos una llamada registrada (estado distinto de Pendiente).'),
+      el('div', { style:'display:flex;align-items:center;gap:18px' }, anillo,
+        el('div', { style:'line-height:1.5' }, el('div', { style:'font-size:15px' }, `${llamados} de ${f.total} leads con llamada`), el('div', { style:`font-weight:800;color:${f.pend ? '#f87171' : '#4ade80'}` }, `Pendientes: ${f.pend}`)))),
+    el('div', { style:CARD }, preg('Leads totales', 'Personas únicas (un teléfono = una persona) sumando las pestañas Leads, Leads calificados y Call Center.'),
+      el('div', { style:'font-size:52px;font-weight:800;line-height:1;color:#60a5fa' }, String(f.total)),
+      el('div', { style:'display:flex;flex-wrap:wrap;gap:8px' }, chip(`Hoy: +${a.hoyLeads}`), chip(`Últimos ${st.dias} días: ${a.leads}`), chip(`Calificados: ${cal} (${pct1(cal, f.total)})`))),
+    el('div', { style:CARD }, preg('Inscritos vs. meta', 'Inscritos reales según la hoja TBS_INSCRIPCIONES (aparte del CRM). Conversión = inscritos ÷ leads calificados.'),
+      el('div', { style:'font-size:52px;font-weight:800;line-height:1;color:#4ade80' }, String(mf.ins)),
+      mf.meta ? el('div', {}, el('div', { style:'height:12px;border-radius:6px;background:rgba(127,127,127,.22);overflow:hidden' }, el('div', { style:`height:100%;width:${Math.max(pm, 1)}%;background:#4ade80` })),
+        el('div', { style:'margin-top:6px;font-size:13px;opacity:.8' }, `Meta: ${mf.meta} · avance ${Math.round(1000 * mf.ins / mf.meta) / 10}%`)) : null,
+      el('div', { style:'display:flex;flex-wrap:wrap;gap:8px' }, chip(`Conversión sobre calificados: ${pct1(mf.ins, cal)}`))));
+}
+function panelLlamadas(ids) {
+  const filas = embudoFilas(ids);
+  if (!filas.length) return '';
+  const f = embudoTotal(filas), c = conciliacion(ids);
+  const seg = [['Contactados (contestaron)', f.cont, '#4ade80', 'Última llamada: Contestó.'], ['No contestan', f.nocont, '#f87171', 'Última llamada: No contestó.'], ['No interesados', f.noint, '#a78bfa', 'Marcados No interesado o dados de baja.'],
+    ['Volver a llamar', f.volver, '#fbbf24', 'Quedaron para un nuevo intento.'], ['Pendientes por llamar', f.pend, '#94a3b8', 'Aún sin ninguna llamada registrada.']];
+  if (f.otros > 0) seg.push(['Estado no reconocido', f.otros, '#64748b', 'Estado de llamada que el sistema no clasifica.']);
+  const card = x => el('div', { style:MINI(x[2]) },
+    el('div', { style:'display:flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, x[0], ayuda(x[3])),
+    el('div', { style:'font-size:34px;font-weight:800;line-height:1.1;margin:10px 0' }, String(x[1])),
+    el('span', { style:`display:inline-block;background:${x[2]}26;color:${x[2]};border:1px solid ${x[2]}66;border-radius:999px;padding:4px 12px;font-size:14px;font-weight:800` }, pct1(x[1], f.total)));
+  const sub = `Total ${c.total} leads = ${c.l30} de los últimos ${st.dias} días + ${c.anteriores} anteriores` + (c.sinFecha > 0 ? ` + ${c.sinFecha} sin fecha de ingreso` : '') + '. Cada lead cuenta una sola vez, con el estado de su última llamada.';
+  return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Gestión de contactos'),
+    el('div', { class:'sub', style:'margin:6px 0 20px;line-height:1.5' }, sub),
+    el('div', { style:'display:flex;gap:3px;height:22px;border-radius:11px;overflow:hidden;margin-bottom:22px' },
+      seg.filter(x => x[1] > 0).map(x => el('div', { title:`${x[0]}: ${x[1]}`, style:`width:${100 * x[1] / (f.total || 1)}%;background:${x[2]};min-width:4px` }))),
+    el('div', { style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px' }, seg.map(card)),
+    el('div', { style:'margin-top:16px;font-weight:700;color:' + (c.cuadra === false ? '#f87171' : '#4ade80') },
+      c.cuadra === null ? '' : c.cuadra ? `✓ Control: la suma de estados (${f.total}) coincide con el total de personas de las hojas.` : '⚠ Control: la suma de estados no coincide con el total de personas de las hojas. Revisar.'));
+}
+function panelEtapas(ids) {
+  const r = resumenLlamadas(ids);
+  if (!r) return '';
+  const v = g => (r[g] === null || r[g] === undefined) ? null : r[g], num = x => x === null ? '—' : String(x);
+  const etapas = [['Leads', v('leads'), '#60a5fa', 'Leads con llamada cuya etapa más avanzada es la pestaña Leads.'], ['Leads calificados', v('calificados'), '#a78bfa', 'Leads con llamada cuya etapa más avanzada es la pestaña Leads calificados.'], ['Call Center', v('callcenter'), '#fb923c', 'Leads con llamada que ya pasaron a la pestaña Call Center.']];
+  const todo = etapas.every(x => x[1] !== null), tot = todo ? etapas.reduce((x, y) => x + y[1], 0) : null;
+  return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Gestión por etapa'),
+    el('div', { class:'sub', style:'margin:6px 0 20px;line-height:1.5' }, 'Leads con llamada registrada, según la etapa más avanzada en la que aparecen (Call Center > Calificados > Leads). Cada lead cuenta una sola vez. Acumulado.'),
+    el('div', { style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px' },
+      etapas.map(x => el('div', { style:MINI(x[2]) }, el('div', { style:'display:flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, x[0], ayuda(x[3])),
+        el('div', { style:`font-size:34px;font-weight:800;line-height:1.1;margin:10px 0;color:${x[2]}` }, num(x[1])))),
+      el('div', { style:MINI('#4ade80') }, el('div', { style:'font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, 'Total con llamada'),
+        el('div', { style:'font-size:34px;font-weight:800;line-height:1.1;margin:10px 0' }, num(tot)))),
+    todo ? null : el('div', { class:'sub', style:'margin-top:12px;color:#f87171' }, 'Dato no disponible en alguna sede: falta publicar la versión con ?crm=conteos de su Apps Script.'));
+}
+function panelHistoria(ids) {
+  const ss = sedesVis(ids);
+  if (!ss.length) return '';
+  const f = embudoTotal(embudoFilas(ids)), cal = califTotal(ids), ins = inscTotal(ids);
+  const pasos = [
+    ['Leads', f.total, 'Personas únicas registradas', '#60a5fa', 'Un teléfono = una persona, sumando las 3 pestañas.'],
+    ['Leads con llamada', f.total - f.pend, 'Con al menos una llamada registrada', '#fb923c', 'Estado de llamada distinto de Pendiente.'],
+    ['Leads calificados', cal, 'Pasaron a la pestaña de calificados', '#a78bfa', 'Leads que el bot o el equipo marcó como calificados.'],
+    ['Inscritos', ins, 'Pago de inscripción confirmado', '#4ade80', 'Dato de la hoja TBS_INSCRIPCIONES.']];
+  const fila = (p, i) => el('div', { style:'display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:16px 0;border-top:1px solid var(--line)' },
+    el('div', { style:'flex:1 1 210px' },
+      el('div', { style:'display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px' },
+        el('span', { style:`width:26px;height:26px;border-radius:50%;background:${p[3]};color:#0b1220;display:inline-flex;align-items:center;justify-content:center;font-size:14px` }, String(i + 1)), p[0], ayuda(p[4])),
+      el('div', { class:'sub', style:'margin:4px 0 0 36px' }, p[2])),
+    el('div', { style:'flex:2 1 240px;height:34px;border-radius:12px;background:rgba(127,127,127,.15);overflow:hidden' },
+      el('div', { style:`height:100%;width:${Math.max(3, f.total ? 100 * p[1] / f.total : 0)}%;background:${p[3]};border-radius:12px` })),
+    el('div', { style:'flex:0 0 150px;text-align:right' },
+      el('div', { style:`font-size:32px;font-weight:800;line-height:1.1;color:${p[3]}` }, String(p[1])),
+      el('div', { class:'sub' }, i === 0 ? 'Base (100%)' : `${pct1(p[1], f.total)} de los leads`)));
+  return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Embudo de conversión'),
+    el('div', { class:'sub', style:'margin:6px 0 10px' }, 'Acumulado. Porcentajes calculados sobre el total de leads.'),
+    pasos.map(fila),
+    el('div', { style:'margin-top:8px;border-radius:16px;padding:18px 22px;background:#4ade8014;border:1px solid #4ade8055;display:flex;gap:16px;align-items:center;flex-wrap:wrap' },
+      el('div', { style:'font-size:34px;font-weight:800;color:#4ade80' }, pct1(ins, cal)),
+      el('div', { style:'font-weight:700;font-size:16px' }, `Conversión de leads calificados a inscritos (${ins} de ${cal})`)),
+    el('div', { class:'sub', style:'margin-top:12px;line-height:1.5' }, 'Los inscritos provienen de la hoja de inscripciones, independiente del CRM: la conversión compara dos conteos y no sigue a las mismas personas.'));
+}
+function panelPorSede(ids) {
+  const ss = sedesVis(ids);
+  if (!ss.length) return '';
+  const filas = ss.map(s => {
+    const x = agg([st.data[s.id]], st.dias), e = embudoSede(s), p = e.total ? Math.round(100 * (e.total - e.pend) / e.total) : 0, n = nivelSemaforo(p), cal = califAcum(s), ins = inscritosSede(s);
+    return el('tr', {}, el('td', {}, s.nombre), el('td', { style:`font-weight:700;color:${n[0]}` }, '● ' + n[1]), el('td', {}, String(x.leads)), el('td', {}, String(x.llam)), el('td', {}, p + '%'),
+      el('td', {}, String(x.hoyLlam)), el('td', {}, String(x.pend)), el('td', {}, String(cal)), el('td', {}, String(ins)), el('td', { style:'font-weight:700' }, pct1(ins, cal)));
+  });
+  return el('div', { class:'panel scroll' }, el('h3', {}, 'Cómo va cada sede'),
+    el('div', { class:'sub', style:'margin:4px 0 0' }, `Leads y llamadas son de los últimos ${st.dias} días; "Por llamar", calificados e inscritos son acumulados.`),
+    el('table', { style:'margin-top:10px' },
+      el('thead', {}, el('tr', {}, ['Sede', 'Estado', 'Leads', 'Leads llamados (período)', '% ya llamado (acum.)', 'Llamadas hoy', 'Por llamar', 'Calificados', 'Inscritos', 'Inscritos ÷ calificados'].map(h => el('th', {}, h)))),
+      el('tbody', {}, filas)));
+}
+function tarjeta(num, lbl, hint, color) { return el('div', { class:'kpi', style: color ? `--c:${color}` : '' }, el('div', { class:'lbl' }, lbl), el('div', { class:'num' }, String(num)), el('div', { style:'font-size:12px;opacity:.7;margin-top:4px;line-height:1.3' }, hint)); }
 function kpi(num, lbl, color) { return el('div', { class:'kpi', style: color ? `--c:${color}` : '' }, el('div', { class:'lbl' }, lbl), el('div', { class:'num' }, String(num))); }
 
 /* ═══ METAS: inscritos = personas marcadas "Se inscribió" (solo cuando ya pagaron la cuota) ═══ */
@@ -548,7 +681,7 @@ function vistaDatos(a, titulo, ids) {
     el('div', { class:'bar' },
       el('div', {},
         el('h2', {}, titulo),
-        el('div', { class:'sub' }, 'Seguimiento comercial, llamadas y conversión de leads')),
+        el('div', { class:'sub' }, '¿Estamos atendiendo a las personas que nos escriben?')),
       el('select', { 'aria-label':'Periodo', onchange:e => { st.dias = +e.target.value; render(); } },
         [7, 14, 30].map(n => {
           const o = el('option', { value:n }, `Últimos ${n} días`);
@@ -557,24 +690,22 @@ function vistaDatos(a, titulo, ids) {
         }))
     ),
 
-    el('div', { class:'kpis' },
-      kpi(a.hoyLeads, 'Leads hoy', 'var(--leads)'),
-      kpi(a.leads, `Leads ${st.dias} días`, 'var(--brand)'),
-      kpi(a.calif, 'Leads calificados', 'var(--brand2)'),
-      kpi(convCalif + '%', 'Conversión a calificado', 'var(--brand)'),
-      kpi(a.contestadas, 'Llamadas contestadas', 'var(--ok)'),
-      kpi(a.noContestadas, 'No contestadas', 'var(--bad)'),
-      kpi(a.pend, 'Llamadas pendientes', 'var(--mute)'),
-      kpi(a.noInteresados, 'No interesados', 'var(--bad)'),
-      kpi(embudoTotal(embudoFilas(ids)).total, 'Total de leads · acumulado', 'var(--brand)'),
-      kpi(conteo('leads'), 'Llamadas a leads', 'var(--leads)'),
-      kpi(conteo('calificados'), 'Llamadas a leads calificados', 'var(--brand2)'),
-      kpi(conteo('callcenter'), 'Llamadas Call Center', 'var(--call)'),
-      kpi(['leads','calificados','callcenter'].every(g => resumen[g] !== null) ? resumen.leads + resumen.calificados + resumen.callcenter : '—', 'Total de llamadas · acumuladas', 'var(--ok)'),
-      kpi(mf.ins, 'Estudiantes inscritos', 'var(--ok)'),
-      kpi(convInsc, 'Conversión a inscrito', 'var(--brand)'),
-      kpi(mf.meta ? `${mf.ins} / ${mf.meta}` : '—', `Meta de inscritos · ${mf.meta ? Math.round(100 * mf.ins / mf.meta) : 0}%`, 'var(--brand2)')
-    ),
+    semaforoGeneral(a, ids),
+    heroVistazo(a, ids, mf),
+    panelLlamadas(ids),
+    panelEtapas(ids),
+    panelHistoria(ids),
+    panelPorSede(ids),
+    el('details', { class:'panel', open:'' }, el('summary', { style:'cursor:pointer;font-weight:800;font-size:16px' }, 'Indicadores del período'),
+      el('div', { style:'margin-top:16px' }),
+      el('div', { class:'kpis' },
+      tarjeta(a.hoyLeads, 'Leads de hoy', 'Personas nuevas que escribieron hoy', 'var(--leads)'),
+      tarjeta(a.leads, `Leads · ${st.dias} días`, 'Personas nuevas en el período elegido', 'var(--brand)'),
+      tarjeta(a.calif, 'Calificados', `${convCalif}% de los leads tiene interés real`, 'var(--brand2)'),
+      tarjeta(a.llam, `Leads llamados · ${st.dias} días`, 'Leads cuya última llamada cayó en este período', 'var(--call)'),
+      tarjeta(a.pend, 'Por llamar (acumulado)', 'Leads que todavía nadie ha llamado', 'var(--bad)'),
+      tarjeta(mf.ins, 'Inscritos', `${pctCalifInsc(ids)} de los calificados · Meta ${mf.meta || '—'}`, 'var(--ok)')
+    )),
 
     panelEmbudo(ids),
     panelMetas(ids),
