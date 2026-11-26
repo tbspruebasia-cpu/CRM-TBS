@@ -333,7 +333,7 @@ function agg(list, n) {
     dias: dias.map(d => ({ d, leads:0, calif:0, llam:0, contestadas:0, noContestadas:0, volverALlamar:0, inscritos:0, noInteresados:0 })),
     hoyLeads:0, hoyLlam:0,
     leads:0, calif:0, llam:0,
-    pend:0, real:0,
+    pend:0, real:0, otros:0,
     contestadas:0, noContestadas:0, volverALlamar:0, inscritos:0, noInteresados:0,
     carreras:Object.fromEntries(CARRERAS.map(c => [c[0], 0])), otrasCarreras:0, estados:{}, temperaturas:{'Frío':0,'Tibio':0,'Caliente':0}
   };
@@ -359,6 +359,7 @@ function agg(list, n) {
 
     const t = j.totales || {};
     out.pend += Number(t.pendientes || 0);
+    out.otros += Number(t.otros || 0);
     out.real += Number(t.realizadas || 0);
     out.contestadas += Number(t.contestadas || 0);
     out.noContestadas += Number(t.noContestadas || 0);
@@ -428,9 +429,9 @@ function conciliacion(ids) {
 function semaforoGeneral(a, ids) {
   const ft = embudoTotal(embudoFilas(ids));
   if (!ft.total) return '';
-  const p = Math.round(100 * (ft.total - ft.pend) / ft.total), n = nivelSemaforo(p);
+  const p = Math.round(100 * ft.real / ft.total), n = nivelSemaforo(p);
   const titulo = p >= UMBRAL_BUENO ? 'En ritmo' : p >= UMBRAL_ATENCION ? 'Atención' : 'Atrasado';
-  const atras = sedesVis(ids).filter(s => { const e = embudoSede(s); return nivelSemaforo(e.total ? Math.round(100 * (e.total - e.pend) / e.total) : 0)[1] === 'Atrasada'; }).map(s => s.nombre);
+  const atras = sedesVis(ids).filter(s => { const e = embudoSede(s); return nivelSemaforo(e.total ? Math.round(100 * e.real / e.total) : 0)[1] === 'Atrasada'; }).map(s => s.nombre);
   return el('div', { class:'panel', style:`border-left:6px solid ${n[0]};margin-top:12px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center` },
     el('div', { style:`font-weight:800;font-size:22px;color:${n[0]}` }, '● ' + titulo),
     el('div', { style:'flex:1 1 280px;line-height:1.5;font-size:15px' }, `Cobertura de llamadas: ${p}% de los leads ya tiene al menos una llamada registrada. Pendientes por llamar: ${ft.pend}.`,
@@ -440,7 +441,7 @@ function semaforoGeneral(a, ids) {
 function heroVistazo(a, ids, mf) {
   const f = embudoTotal(embudoFilas(ids));
   if (!f.total) return '';
-  const llamados = f.total - f.pend, p = Math.round(100 * llamados / f.total), n = nivelSemaforo(p), cal = califTotal(ids);
+  const llamados = f.real, p = Math.round(100 * llamados / f.total), n = nivelSemaforo(p), cal = califTotal(ids);
   const preg = (txt, tip) => el('div', { style:'display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;text-transform:uppercase;letter-spacing:.05em' }, txt, ayuda(tip));
   const pm = mf.meta ? Math.min(100, Math.round(100 * mf.ins / mf.meta)) : 0;
   const anillo = el('div', { style:`position:relative;width:112px;height:112px;border-radius:50%;flex:none;background:conic-gradient(${n[0]} ${p}%, rgba(127,127,127,.22) 0)` },
@@ -448,10 +449,10 @@ function heroVistazo(a, ids, mf) {
   return el('div', { style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px;margin-top:16px' },
     el('div', { style:CARD }, preg('Cobertura de llamadas', 'Porcentaje de leads con al menos una llamada registrada (estado distinto de Pendiente).'),
       el('div', { style:'display:flex;align-items:center;gap:18px' }, anillo,
-        el('div', { style:'line-height:1.5' }, el('div', { style:'font-size:15px' }, `${llamados} de ${f.total} leads con llamada`), el('div', { style:`font-weight:800;color:${f.pend ? '#f87171' : '#4ade80'}` }, `Pendientes: ${f.pend}`)))),
+        el('div', { style:'line-height:1.5' }, el('div', { style:'font-size:15px' }, `${llamados} de ${f.total} leads con llamada`), el('div', { style:`font-weight:800;color:${f.pend ? '#f87171' : '#4ade80'}` }, `Pendientes: ${f.pend}`), f.cerr ? el('div', { style:'font-size:13px;opacity:.8' }, `Cerrados sin llamada: ${f.cerr}`) : null))),
     el('div', { style:CARD }, preg('Leads totales', 'Personas únicas (un teléfono = una persona) sumando las pestañas Leads, Leads calificados y Call Center.'),
       el('div', { style:'font-size:52px;font-weight:800;line-height:1;color:#60a5fa' }, String(f.total)),
-      el('div', { style:'display:flex;flex-wrap:wrap;gap:8px' }, chip(`Hoy: +${a.hoyLeads}`), chip(`Últimos ${st.dias} días: ${a.leads}`), chip(`Calificados: ${cal} (${pct1(cal, f.total)})`))),
+      el('div', { style:'display:flex;flex-wrap:wrap;gap:8px' }, chip(`Hoy: +${a.hoyLeads}`), chip(`Calificados: ${cal} (${pct1(cal, f.total)})`))),
     el('div', { style:CARD }, preg('Inscritos vs. meta', 'Inscritos reales según la hoja TBS_INSCRIPCIONES (aparte del CRM). Conversión = inscritos ÷ leads calificados.'),
       el('div', { style:'font-size:52px;font-weight:800;line-height:1;color:#4ade80' }, String(mf.ins)),
       mf.meta ? el('div', {}, el('div', { style:'height:12px;border-radius:6px;background:rgba(127,127,127,.22);overflow:hidden' }, el('div', { style:`height:100%;width:${Math.max(pm, 1)}%;background:#4ade80` })),
@@ -469,7 +470,7 @@ function panelLlamadas(ids) {
     el('div', { style:'display:flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, x[0], ayuda(x[3])),
     el('div', { style:'font-size:34px;font-weight:800;line-height:1.1;margin:10px 0' }, String(x[1])),
     el('span', { style:`display:inline-block;background:${x[2]}26;color:${x[2]};border:1px solid ${x[2]}66;border-radius:999px;padding:4px 12px;font-size:14px;font-weight:800` }, pct1(x[1], f.total)));
-  const sub = `Total ${c.total} leads = ${c.l30} de los últimos ${st.dias} días + ${c.anteriores} anteriores` + (c.sinFecha > 0 ? ` + ${c.sinFecha} sin fecha de ingreso` : '') + '. Cada lead cuenta una sola vez, con el estado de su última llamada.';
+  const sub = `Total ${f.total} leads = ${f.real} con llamada registrada + ${f.pend} pendientes por llamar` + (f.cerr ? ` + ${f.cerr} cerrados sin llamada (No interesado, baja o inscrito marcado)` : '') + '. Cada lead cuenta una sola vez, con el estado de su última llamada.';
   return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Gestión de contactos'),
     el('div', { class:'sub', style:'margin:6px 0 20px;line-height:1.5' }, sub),
     el('div', { style:'display:flex;gap:3px;height:22px;border-radius:11px;overflow:hidden;margin-bottom:22px' },
@@ -478,29 +479,14 @@ function panelLlamadas(ids) {
     el('div', { style:'margin-top:16px;font-weight:700;color:' + (c.cuadra === false ? '#f87171' : '#4ade80') },
       c.cuadra === null ? '' : c.cuadra ? `✓ Control: la suma de estados (${f.total}) coincide con el total de personas de las hojas.` : '⚠ Control: la suma de estados no coincide con el total de personas de las hojas. Revisar.'));
 }
-function panelEtapas(ids) {
-  const r = resumenLlamadas(ids);
-  if (!r) return '';
-  const v = g => (r[g] === null || r[g] === undefined) ? null : r[g], num = x => x === null ? '—' : String(x);
-  const etapas = [['Leads', v('leads'), '#60a5fa', 'Leads con llamada cuya etapa más avanzada es la pestaña Leads.'], ['Leads calificados', v('calificados'), '#a78bfa', 'Leads con llamada cuya etapa más avanzada es la pestaña Leads calificados.'], ['Call Center', v('callcenter'), '#fb923c', 'Leads con llamada que ya pasaron a la pestaña Call Center.']];
-  const todo = etapas.every(x => x[1] !== null), tot = todo ? etapas.reduce((x, y) => x + y[1], 0) : null;
-  return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Gestión por etapa'),
-    el('div', { class:'sub', style:'margin:6px 0 20px;line-height:1.5' }, 'Leads con llamada registrada, según la etapa más avanzada en la que aparecen (Call Center > Calificados > Leads). Cada lead cuenta una sola vez. Acumulado.'),
-    el('div', { style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px' },
-      etapas.map(x => el('div', { style:MINI(x[2]) }, el('div', { style:'display:flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, x[0], ayuda(x[3])),
-        el('div', { style:`font-size:34px;font-weight:800;line-height:1.1;margin:10px 0;color:${x[2]}` }, num(x[1])))),
-      el('div', { style:MINI('#4ade80') }, el('div', { style:'font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-weight:700' }, 'Total con llamada'),
-        el('div', { style:'font-size:34px;font-weight:800;line-height:1.1;margin:10px 0' }, num(tot)))),
-    todo ? null : el('div', { class:'sub', style:'margin-top:12px;color:#f87171' }, 'Dato no disponible en alguna sede: falta publicar la versión con ?crm=conteos de su Apps Script.'));
-}
 function panelHistoria(ids) {
   const ss = sedesVis(ids);
   if (!ss.length) return '';
   const f = embudoTotal(embudoFilas(ids)), cal = califTotal(ids), ins = inscTotal(ids);
   const pasos = [
     ['Leads', f.total, 'Personas únicas registradas', '#60a5fa', 'Un teléfono = una persona, sumando las 3 pestañas.'],
-    ['Leads con llamada', f.total - f.pend, 'Con al menos una llamada registrada', '#fb923c', 'Estado de llamada distinto de Pendiente.'],
-    ['Leads calificados', cal, 'Pasaron a la pestaña de calificados', '#a78bfa', 'Leads que el bot o el equipo marcó como calificados.'],
+    ['Leads con llamada', f.real, 'Con al menos una llamada registrada', '#fb923c', 'Personas con una llamada registrada en alguna de las 3 pestañas.'],
+    ['Calificados (histórico)', cal, 'Todos los que alguna vez calificaron, con o sin llamada', '#a78bfa', 'Leads que el bot o el equipo marcó como calificados.'],
     ['Inscritos', ins, 'Pago de inscripción confirmado', '#4ade80', 'Dato de la hoja TBS_INSCRIPCIONES.']];
   const fila = (p, i) => el('div', { style:'display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:16px 0;border-top:1px solid var(--line)' },
     el('div', { style:'flex:1 1 210px' },
@@ -513,26 +499,44 @@ function panelHistoria(ids) {
       el('div', { style:`font-size:32px;font-weight:800;line-height:1.1;color:${p[3]}` }, String(p[1])),
       el('div', { class:'sub' }, i === 0 ? 'Base (100%)' : `${pct1(p[1], f.total)} de los leads`)));
   return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Embudo de conversión'),
-    el('div', { class:'sub', style:'margin:6px 0 10px' }, 'Acumulado. Porcentajes calculados sobre el total de leads.'),
+    el('div', { class:'sub', style:'margin:6px 0 10px' }, `Acumulado. Porcentajes sobre el total de leads. ${f.total} leads = ${f.real} con llamada + ${f.pend} pendientes por llamar` + (f.cerr ? ` + ${f.cerr} cerrados sin llamada (No interesado, baja o inscrito marcado)` : '') + '.'),
     pasos.map(fila),
     el('div', { style:'margin-top:8px;border-radius:16px;padding:18px 22px;background:#4ade8014;border:1px solid #4ade8055;display:flex;gap:16px;align-items:center;flex-wrap:wrap' },
       el('div', { style:'font-size:34px;font-weight:800;color:#4ade80' }, pct1(ins, cal)),
       el('div', { style:'font-weight:700;font-size:16px' }, `Conversión de leads calificados a inscritos (${ins} de ${cal})`)),
     el('div', { class:'sub', style:'margin-top:12px;line-height:1.5' }, 'Los inscritos provienen de la hoja de inscripciones, independiente del CRM: la conversión compara dos conteos y no sigue a las mismas personas.'));
 }
+function panelCuadre(ids) {
+  if (!sedesVis(ids).length) return '';
+  const f = embudoTotal(embudoFilas(ids)), c = conciliacion(ids), mal = c.cuadra === false || f.cerr < 0;
+  const caja = (lbl, v, col) => el('div', { style:`flex:1 1 130px;text-align:center;padding:14px 10px;border-radius:16px;background:${col}14;border:1px solid ${col}55` },
+    el('div', { style:`font-size:30px;font-weight:800;line-height:1.1;color:${col}` }, String(v)),
+    el('div', { style:'font-size:13px;font-weight:700;margin-top:4px' }, lbl));
+  const signo = t => el('div', { style:'align-self:center;font-size:24px;font-weight:800;opacity:.55' }, t);
+  return el('div', { class:'panel', style:'padding:26px' }, el('h3', {}, 'Resumen de leads'),
+    el('div', { style:'display:flex;flex-wrap:wrap;gap:10px;margin-top:16px' },
+      caja('Con llamada', f.real, '#fb923c'), signo('+'), caja('Por llamar', f.pend, '#94a3b8'), signo('+'),
+      caja('Cerrados sin llamada', f.cerr, '#a78bfa'), signo('='), caja(c.cuadra === true && !mal ? 'Total de leads ✓' : 'Total de leads', f.total, '#60a5fa')),
+    mal ? el('div', { class:'err', style:'margin-top:10px;font-weight:700' }, '⚠ El total no coincide con las hojas. Revisar.') : null,
+    el('div', { style:'display:flex;flex-wrap:wrap;gap:8px;margin-top:16px' },
+      chip(`Calificados con fecha de ingreso: ${califTotal(ids)} (incluidos en el total)`), chip(`Inscritos: ${inscTotal(ids)} (hoja de inscripciones)`)),
+    el('div', { class:'sub', style:'margin-top:12px' }, 'Los totales son acumulados. El gráfico muestra solo la actividad con fecha del período elegido.'));
+}
 function panelPorSede(ids) {
   const ss = sedesVis(ids);
   if (!ss.length) return '';
+  const celdas = (e, cal, ins) => [e.total, e.real, e.pend, e.cerr, cal, ins, pct1(ins, cal)].map(v => el('td', {}, String(v)));
   const filas = ss.map(s => {
-    const x = agg([st.data[s.id]], st.dias), e = embudoSede(s), p = e.total ? Math.round(100 * (e.total - e.pend) / e.total) : 0, n = nivelSemaforo(p), cal = califAcum(s), ins = inscritosSede(s);
-    return el('tr', {}, el('td', {}, s.nombre), el('td', { style:`font-weight:700;color:${n[0]}` }, '● ' + n[1]), el('td', {}, String(x.leads)), el('td', {}, String(x.llam)), el('td', {}, p + '%'),
-      el('td', {}, String(x.hoyLlam)), el('td', {}, String(x.pend)), el('td', {}, String(cal)), el('td', {}, String(ins)), el('td', { style:'font-weight:700' }, pct1(ins, cal)));
+    const e = embudoSede(s), p = e.total ? Math.round(100 * e.real / e.total) : 0, n = nivelSemaforo(p);
+    return el('tr', {}, el('td', {}, s.nombre), el('td', { style:`font-weight:700;color:${n[0]}` }, '● ' + n[1]), el('td', {}, p + '%'), ...celdas(e, califAcum(s), inscritosSede(s)));
   });
+  const t = embudoTotal(embudoFilas(ids));
   return el('div', { class:'panel scroll' }, el('h3', {}, 'Cómo va cada sede'),
-    el('div', { class:'sub', style:'margin:4px 0 0' }, `Leads y llamadas son de los últimos ${st.dias} días; "Por llamar", calificados e inscritos son acumulados.`),
+    el('div', { class:'sub', style:'margin:4px 0 0' }, 'Acumulado. En cada sede: Leads = Con llamada + Por llamar + Cerrados sin llamada.'),
     el('table', { style:'margin-top:10px' },
-      el('thead', {}, el('tr', {}, ['Sede', 'Estado', 'Leads', 'Leads llamados (período)', '% ya llamado (acum.)', 'Llamadas hoy', 'Por llamar', 'Calificados', 'Inscritos', 'Inscritos ÷ calificados'].map(h => el('th', {}, h)))),
-      el('tbody', {}, filas)));
+      el('thead', {}, el('tr', {}, ['Sede', 'Estado', '% con llamada', 'Leads', 'Con llamada', 'Por llamar', 'Cerrados sin llamada', 'Calificados', 'Inscritos', 'Inscritos ÷ calificados'].map(h => el('th', {}, h)))),
+      el('tbody', {}, filas),
+      ss.length > 1 ? el('tfoot', {}, el('tr', { style:'font-weight:800' }, el('td', {}, 'Total'), el('td', {}, ''), el('td', {}, pct1(t.real, t.total)), ...celdas(t, califTotal(ids), inscTotal(ids)))) : null));
 }
 function tarjeta(num, lbl, hint, color) { return el('div', { class:'kpi', style: color ? `--c:${color}` : '' }, el('div', { class:'lbl' }, lbl), el('div', { class:'num' }, String(num)), el('div', { style:'font-size:12px;opacity:.7;margin-top:4px;line-height:1.3' }, hint)); }
 function kpi(num, lbl, color) { return el('div', { class:'kpi', style: color ? `--c:${color}` : '' }, el('div', { class:'lbl' }, lbl), el('div', { class:'num' }, String(num))); }
@@ -570,7 +574,7 @@ function inscritosSede(s) {
 function filasMetas(ids) {
   return sedesOk().filter(s => !ids || ids.includes(s.id)).map(s => {
     const meta = METAS[s.id] || 0, ins = inscritosSede(s);
-    const calif = st.data[s.id] ? agg([st.data[s.id]], st.dias).calif : 0;
+    const calif = st.data[s.id] ? califAcum(s) : 0;
     return { s, meta, ins, calif, pct: meta ? Math.round(100 * ins / meta) : 0, faltan: Math.max(0, meta - ins) };
   });
 }
@@ -594,24 +598,22 @@ function panelMetas(ids) {
 function vistaMetas() {
   const f = filasMetas(null), frag = document.createDocumentFragment();
   const meta = f.reduce((a, x) => a + x.meta, 0), ins = f.reduce((a, x) => a + x.ins, 0), calif = f.reduce((a, x) => a + x.calif, 0);
-  const cierre = (i, c) => (i + c) ? Math.round(100 * i / (i + c)) + '%' : '—';
+  const cierre = (i, c) => pct1(i, c);
   frag.append(
     el('div', { class:'bar' }, el('div', {}, el('h2', {}, 'Metas e inscripciones'),
-      el('div', { class:'sub' }, 'Inscritos (ya pagaron) frente a la meta y a los leads calificados')),
-      el('select', { 'aria-label':'Periodo de calificados', onchange:e => { st.dias = +e.target.value; render(); } },
-        [7, 14, 30].map(n => { const o = el('option', { value:n }, `Calificados: últimos ${n} días`); if (n === st.dias) o.selected = true; return o; }))),
+      el('div', { class:'sub' }, 'Inscritos (ya pagaron) frente a la meta y a los leads calificados'))),
     el('div', { class:'kpis' },
       kpi(ins, 'Estudiantes inscritos', 'var(--ok)'),
       kpi(meta, 'Meta total', 'var(--brand)'),
       kpi((meta ? Math.round(100 * ins / meta) : 0) + '%', 'Cumplimiento', 'var(--brand2)'),
       kpi(Math.max(0, meta - ins), 'Faltan para la meta', 'var(--call)'),
-      kpi(calif, `Calificados · ${st.dias} días`, 'var(--leads)')),
+      kpi(calif, 'Calificados (acumulado)', 'var(--leads)')),
     panelMetas(null));
   if (!f.length) return frag;
   frag.append(el('div', { class:'panel scroll' }, el('h3', {}, 'Calificados vs inscritos por sede'),
-    el('div', { class:'sub', style:'margin:4px 0 0' }, `Calificados del bot en los últimos ${st.dias} días; inscritos acumulados. Cierre = inscritos ÷ (inscritos + calificados)`),
+    el('div', { class:'sub', style:'margin:4px 0 0' }, 'Calificados e inscritos acumulados. Inscritos ÷ calificados compara dos conteos independientes (hoja de inscripciones y hoja de leads).'),
     el('table', { style:'margin-top:10px' },
-      el('thead', {}, el('tr', {}, ['Sede', 'Meta', 'Inscritos', 'Faltan', 'Cumplimiento', 'Calificados', 'Cierre'].map(h => el('th', {}, h)))),
+      el('thead', {}, el('tr', {}, ['Sede', 'Meta', 'Inscritos', 'Faltan', 'Cumplimiento', 'Calificados', 'Inscritos ÷ calificados'].map(h => el('th', {}, h)))),
       el('tbody', {}, f.map(x => el('tr', {}, el('td', {}, x.s.nombre), ...[x.meta, x.ins, x.faltan, x.pct + '%', x.calif, cierre(x.ins, x.calif)].map(v => el('td', {}, String(v)))))),
       el('tfoot', {}, el('tr', {}, el('td', {}, 'Total'), ...[meta, ins, Math.max(0, meta - ins), (meta ? Math.round(100 * ins / meta) : 0) + '%', calif, cierre(ins, calif)].map(v => el('td', {}, String(v))))))));
   frag.append(panelCarreras());
@@ -639,13 +641,15 @@ function embudoSede(s) {
   const n = k => Number(t[k] || 0);
   const f = { pend:n('pendientes'), cont:n('contestadas'), nocont:n('noContestadas'), noint:n('noInteresados'), volver:n('volverALlamar'), otros:n('otros') };
   f.total = f.pend + f.cont + f.nocont + f.noint + f.volver + f.otros;
+  f.real = (t.realizadas === undefined || t.realizadas === null || t.realizadas === '') ? f.total - f.pend : Number(t.realizadas); // personas con al menos una llamada registrada
+  f.cerr = f.total - f.pend - f.real; // cerradas sin llamada: No interesado / baja / inscrito marcado sin llamada
   const lista = st.leads[s.id];
   f.enHoja = (st.leadsListo && lista && !st.recortado[s.id]) ? lista.length : null; // solo si la lista no está recortada
   return f;
 }
 function embudoFilas(ids) { return sedesOk().filter(s => (!ids || ids.includes(s.id)) && st.data[s.id]).map(s => ({ s, f:embudoSede(s) })); }
 function embudoTotal(filas) {
-  const z = { pend:0, cont:0, nocont:0, noint:0, volver:0, otros:0, total:0 };
+  const z = { pend:0, cont:0, nocont:0, noint:0, volver:0, otros:0, total:0, real:0, cerr:0 };
   filas.forEach(({ f }) => { for (const k in z) z[k] += f[k]; });
   return z;
 }
@@ -681,31 +685,26 @@ function vistaDatos(a, titulo, ids) {
     el('div', { class:'bar' },
       el('div', {},
         el('h2', {}, titulo),
-        el('div', { class:'sub' }, '¿Estamos atendiendo a las personas que nos escriben?')),
-      el('select', { 'aria-label':'Periodo', onchange:e => { st.dias = +e.target.value; render(); } },
-        [7, 14, 30].map(n => {
-          const o = el('option', { value:n }, `Últimos ${n} días`);
-          if (n === st.dias) o.selected = true;
-          return o;
-        }))
+        el('div', { class:'sub' }, '¿Estamos atendiendo a las personas que nos escriben?'))
     ),
 
     semaforoGeneral(a, ids),
     heroVistazo(a, ids, mf),
     panelLlamadas(ids),
-    panelEtapas(ids),
     panelHistoria(ids),
     panelPorSede(ids),
-    el('details', { class:'panel', open:'' }, el('summary', { style:'cursor:pointer;font-weight:800;font-size:16px' }, 'Indicadores del período'),
+    panelCuadre(ids),
+    el('details', { class:'panel', open:'' }, el('summary', { style:'cursor:pointer;font-weight:800;font-size:16px' }, 'Indicadores'),
       el('div', { style:'margin-top:16px' }),
-      el('div', { class:'kpis' },
-      tarjeta(a.hoyLeads, 'Leads de hoy', 'Personas nuevas que escribieron hoy', 'var(--leads)'),
-      tarjeta(a.leads, `Leads · ${st.dias} días`, 'Personas nuevas en el período elegido', 'var(--brand)'),
-      tarjeta(a.calif, 'Calificados', `${convCalif}% de los leads tiene interés real`, 'var(--brand2)'),
-      tarjeta(a.llam, `Leads llamados · ${st.dias} días`, 'Leads cuya última llamada cayó en este período', 'var(--call)'),
-      tarjeta(a.pend, 'Por llamar (acumulado)', 'Leads que todavía nadie ha llamado', 'var(--bad)'),
-      tarjeta(mf.ins, 'Inscritos', `${pctCalifInsc(ids)} de los calificados · Meta ${mf.meta || '—'}`, 'var(--ok)')
-    )),
+      el('div', { class:'kpis' }, ...(() => { const t = embudoTotal(embudoFilas(ids)), cal = califTotal(ids), ins = inscTotal(ids); return [
+      tarjeta(a.hoyLeads, 'Leads de hoy', 'Actividad del día', 'var(--leads)'),
+      tarjeta(t.total, 'Total de leads', 'Acumulado', 'var(--brand)'),
+      tarjeta(t.real, 'Leads con llamada', 'Acumulado', 'var(--call)'),
+      tarjeta(t.pend, 'Por llamar', 'Acumulado', 'var(--bad)'),
+      tarjeta(t.cerr, 'Cerrados sin llamada', 'Acumulado', 'var(--brand)'),
+      tarjeta(cal, 'Calificados', 'Con fecha de ingreso', 'var(--brand2)'),
+      tarjeta(ins, 'Inscritos', `${pct1(ins, cal)} de los calificados · Meta ${mf.meta || '—'}`, 'var(--ok)')
+    ]; })())),
 
     panelEmbudo(ids),
     panelMetas(ids),
@@ -715,10 +714,16 @@ function vistaDatos(a, titulo, ids) {
       : null),
 
     el('div', { class:'panel' },
-      el('h3', {}, 'Movimiento de leads y llamadas'),
+      el('div', { class:'bar' }, el('h3', {}, 'Actividad diaria'),
+      el('select', { 'aria-label':'Periodo', onchange:e => { st.dias = +e.target.value; render(); } },
+        [7, 14, 30].map(n => {
+          const o = el('option', { value:n }, `Últimos ${n} días`);
+          if (n === st.dias) o.selected = true;
+          return o;
+        }))),
       el('div', { class:'legend' },
         el('span', {}, el('i', { style:'background:var(--leads)' }), 'Leads ingresados'),
-        el('span', {}, el('i', { style:'background:var(--call)' }), 'Llamadas realizadas')
+        el('span', {}, el('i', { style:'background:var(--call)' }), 'Personas con su última llamada ese día')
       ),
       chart(a)
     ),
@@ -731,12 +736,14 @@ function vistaDatos(a, titulo, ids) {
       ),
       el('div', { class:'panel' },
         el('h3', {}, 'Control de llamadas'),
-        el('div', { class:'sub', style:'margin:4px 0 8px' }, 'Resultado del contacto'),
+        el('div', { class:'sub', style:'margin:4px 0 8px' }, 'Resultado de la última llamada · acumulado, cada persona una vez'),
         barras({
           'Contestó': a.contestadas,
           'No contestó': a.noContestadas,
           'Pendiente': a.pend,
-          'No interesado': a.noInteresados
+          'No interesado': a.noInteresados,
+          'Volver a llamar': a.volverALlamar,
+          ...(a.otros ? { 'Estado no reconocido': a.otros } : {})
         }, 'linear-gradient(90deg,var(--call),#f59e0b)')
       )
     ),
@@ -756,42 +763,6 @@ function vistaDatos(a, titulo, ids) {
   );
 
   return frag;
-}
-function tablaSedes() {
-  const filas = sedesOk().map(s => ({ s, a: st.data[s.id] ? agg([st.data[s.id]], st.dias) : null }));
-
-  return el('div', { class:'panel scroll' },
-    el('h3', {}, 'Comparativo por sede'),
-    el('table', { style:'margin-top:10px' },
-      el('thead', {},
-        el('tr', {},
-          ['Sede','Leads','Calificados','Conv.','Contestadas','No contestadas','Volver a llamar','Pendientes','No interesados','Inscritos']
-            .map(h => el('th', {}, h))
-        )
-      ),
-      el('tbody', {},
-        filas.map(({ s, a }) =>
-          el('tr', {},
-            el('td', {}, s.nombre),
-            ...(a
-              ? [
-                  a.leads,
-                  a.calif,
-                  (a.leads ? Math.round(100*a.calif/a.leads) : 0) + '%',
-                  a.contestadas,
-                  a.noContestadas,
-                  a.volverALlamar,
-                  a.pend,
-                  a.noInteresados,
-                  inscritosSede(s)
-                ].map(v => el('td', {}, String(v)))
-              : [el('td', { colspan:9, class:'err' }, st.err[s.id] || '—')]
-            )
-          )
-        )
-      )
-    )
-  );
 }
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DSEM = ['dom','lun','mar','mié','jue','vie','sáb'];
@@ -970,6 +941,14 @@ const contadorExterno = (ids, grupo) => {
   for (const sede of sedes) {
     const datos = st.data[sede.id];
     if (!datos) return null;
+    const tt = datos.totales || {};
+    if (tt[campo] !== undefined && tt[campo] !== null && tt[campo] !== '' && Number.isFinite(Number(tt[campo]))) {
+      total += Number(tt[campo]);
+      const cn = st.conteos && st.conteos[sede.id], per = cn && cn.versionConteos === 1 ? ((cn.periodos || {})[String(st.dias)] || {})[campo] : null;
+      if (per !== null && per !== undefined) recientes += Number(per) || 0;
+      else for (const fecha of rango(st.dias)) { const dia = (datos.dias || {})[fecha]; if (dia) recientes += Number(dia[campo]) || 0; }
+      continue;
+    }
     const conteos = st.conteos && st.conteos[sede.id];
     if (conteos && conteos.versionConteos === 1) {
       const v = Number((conteos.totales || {})[campo]);
@@ -1130,7 +1109,7 @@ function vistaLlamar() {
   sedesOk().filter(s => st.errLeads[s.id]).forEach(s => frag.append(el('div', { class:'msg err', style:'margin-bottom:10px' }, `${s.nombre}: ${st.errLeads[s.id]}`)));
   const realizadas = llamadasHechas();
   const resumen = resumenLlamadas(null);
-  const grupos = [ ['leads','Llamadas a leads','var(--leads)'], ['calificados','Llamadas a leads calificados','var(--brand2)'], ['callcenter','Call Center','var(--call)'] ];
+  const grupos = [ ['leads','Llamadas a leads','var(--leads)'], ['calificados','Llamadas: siguen en Calificados','var(--brand2)'], ['callcenter','Call Center','var(--call)'] ];
   if (!st.grupoLlamadas) st.grupoLlamadas = 'leads';
   frag.append(el('div', { class:'kpis' },
     ...grupos.map(([g,n,color]) => {
@@ -1138,8 +1117,8 @@ function vistaLlamar() {
       return el('button', { class:'kpi', style:'--c:' + color + ';text-align:left', 'aria-pressed':String(st.grupoLlamadas === g), onclick:() => { st.grupoLlamadas = g; render(); } },
         el('div', { class:'lbl' }, n), el('div', { class:'num' }, cantidad === null ? '—' : String(cantidad)), el('div', { class:'sub' }, cantidad === null ? 'Sin desglose disponible en esta sede' : 'Realizadas · ver lista'));
     }),
-    el('div', { class:'kpi', style:'--c:var(--ok)' }, el('div', { class:'lbl' }, 'Total de llamadas'),
-      el('div', { class:'num' }, String(['leads','calificados','callcenter'].every(g => resumen[g] !== null) ? resumen.leads + resumen.calificados + resumen.callcenter : '—')), el('div', { class:'sub' }, 'Suma histórica de las tres hojas'))));
+    el('div', { class:'kpi', style:'--c:var(--ok)' }, el('div', { class:'lbl' }, 'Leads con llamada'),
+      el('div', { class:'num' }, String(['leads','calificados','callcenter'].every(g => resumen[g] !== null) ? resumen.leads + resumen.calificados + resumen.callcenter : '—')), el('div', { class:'sub' }, 'Suma de las tres hojas · cada persona una vez'))));
   const grupo = st.grupoLlamadas;
   const pendientes = cola().filter(l => grupoLlamada(l) === grupo);
   const hayHistorialExacto = sedesOk().every(s => st.conteos[s.id] && st.conteos[s.id].versionConteos === 1);
@@ -1264,7 +1243,6 @@ function render() {
     else {
       const titulo = acc.length === 1 ? 'Sede ' + acc[0].nombre : 'Resumen general' + (ok.length < acc.length ? ` (${ok.length} de ${acc.length} conectadas)` : '');
       main.append(vistaDatos(agg(ok.map(s => st.data[s.id]), st.dias), titulo, acc.map(s => s.id)));
-      if (acc.length > 1) main.append(tablaSedes());
     }
   } else {
     const s = SEDES.find(x => x.id === st.tab), j = st.data[s.id];
